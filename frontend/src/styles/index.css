@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-cyber-blue text-white font-semibold rounded-lg shadow-sm hover:bg-blue-600 transition-colors;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-slate-800 text-slate-100 font-semibold rounded-lg border border-slate-700 hover:bg-slate-700 transition-colors;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-cyber-red text-white font-semibold rounded-lg hover:bg-red-600 transition-colors;
+  }
+
+  .card {
+    @apply bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-[0_20px_60px_-25px_rgba(15,23,42,0.9)];
+  }
+
+  .input-base {
+    @apply bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyber-blue focus:ring-2 focus:ring-cyber-blue/20 transition;
+  }
+
+  .badge-low {
+    @apply inline-block px-3 py-1 rounded-full text-xs font-semibold bg-cyber-green/15 text-cyber-green;
+  }
+
+  .badge-medium {
+    @apply inline-block px-3 py-1 rounded-full text-xs font-semibold bg-cyber-yellow/15 text-cyber-yellow;
+  }
+
+  .badge-high {
+    @apply inline-block px-3 py-1 rounded-full text-xs font-semibold bg-orange-500/15 text-orange-400;
+  }
+
+  .badge-critical {
+    @apply inline-block px-3 py-1 rounded-full text-xs font-semibold bg-cyber-red/15 text-cyber-red;
+  }
+}

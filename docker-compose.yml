@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Ollama - Local LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama_data:/root/.ollama
+    command: serve
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - AI_PROVIDER=ollama
+      - AI_MODEL=llama3
+      - AI_BASE_URL=http://ollama:11434
+      - DATABASE_PATH=/app/data/securecode.db
+      - CORS_ORIGIN=http://localhost:5173
+    depends_on:
+      - ollama
+    volumes:
+      - ./backend/data:/app/data
+    networks:
+      - securecode-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    depends_on:
+      - backend
+    networks:
+      - securecode-network
+
+networks:
+  securecode-network:
+    driver: bridge
+
+volumes:
+  ollama_data:

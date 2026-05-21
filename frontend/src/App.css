@@ -1,0 +1,66 @@
+/* Global Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #0b1120;
+  color: #e2e8f0;
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 1rem;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35);
+}
+
+.code-editor {
+  min-height: 360px;
+}
+
+.code-editor textarea,
+.code-editor pre {
+  min-height: 360px;
+}
+
+.line-numbers {
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.code-editor ::selection {
+  background: rgba(37, 99, 235, 0.25);
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b1120;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.5);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
