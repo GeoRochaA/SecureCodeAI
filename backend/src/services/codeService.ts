@@ -3,6 +3,7 @@ import { run, getOne, query } from '../database/init.js';
 import {
   analyzePromptSecurity,
   analyzeCodeSecurity,
+  type CodeVulnerability,
   generateSecureCode,
   logSecurityEvent,
   updateStatistics,
@@ -36,7 +37,7 @@ export interface CodeGenerationResponse {
   };
   codeAnalysis?: {
     isVulnerable: boolean;
-    vulnerabilities: any[];
+    vulnerabilities: CodeVulnerability[];
     riskScore: number;
   };
   secureCode?: string;
@@ -44,6 +45,94 @@ export interface CodeGenerationResponse {
 }
 
 export interface CodeAuditResponse extends CodeGenerationResponse {}
+
+interface StatisticsRow {
+  id: string;
+  total_prompts: number;
+  total_attacks_blocked: number;
+  total_vulnerabilities_detected: number;
+  total_corrections: number;
+  last_updated: string;
+}
+
+interface VulnerabilityTypeCount {
+  vulnerability_type: string;
+  count: number;
+}
+
+interface RiskLevelCount {
+  risk_level: string;
+  count: number;
+}
+
+interface SecurityLogRow {
+  id: string;
+  event_type: string;
+  severity: string;
+  message: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  details: string | null;
+  created_at: string;
+}
+
+interface SecurityStatistics {
+  overall?: StatisticsRow;
+  recentLogs: SecurityLogRow[];
+  vulnerabilitiesByType: VulnerabilityTypeCount[];
+  risksByLevel: RiskLevelCount[];
+}
+
+interface PromptHistoryRow {
+  id: string;
+  user_input: string;
+  risk_level: string;
+  is_injection_detected: number;
+  injection_type: string | null;
+  created_at: string;
+  code_response_id: string | null;
+  generated_code: string | null;
+  language: string | null;
+  is_vulnerable: number | null;
+}
+
+interface PromptRow {
+  id: string;
+  user_input: string;
+  risk_level: string;
+  is_injection_detected: number;
+  injection_type: string | null;
+  created_at: string;
+}
+
+interface CodeResponseRow {
+  id: string;
+  prompt_id: string;
+  generated_code: string | null;
+  language: string | null;
+  is_vulnerable: number;
+  vulnerabilities: string | null;
+  created_at: string;
+}
+
+interface CodeCorrectionRow {
+  id: string;
+  response_id: string;
+  vulnerability_type: string;
+  vulnerability_description: string | null;
+  secure_code: string | null;
+  owasp_category: string | null;
+  created_at: string;
+}
+
+type PromptDetails = PromptRow & {
+  codeResponse?: CodeResponseRow;
+  vulnerabilities: CodeCorrectionRow[];
+};
+
+const getErrorMessage = (error: unknown): string => {
+  return error instanceof Error ? error.message : String(error);
+};
 
 /**
  * Processa uma solicitação de geração de código
@@ -103,7 +192,7 @@ export const processCodeGeneration = async (
     // Salvar resposta no banco
     await run(
       `INSERT INTO code_responses (id, prompt_id, generated_code, language, is_vulnerable, vulnerabilities)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?)`,
       [
         responseId,
         promptAnalysis.promptId,
@@ -123,7 +212,7 @@ export const processCodeGeneration = async (
       for (const vuln of codeAnalysis.vulnerabilities) {
         await run(
           `INSERT INTO code_corrections (id, response_id, vulnerability_type, vulnerability_description, owasp_category)
-           VALUES (?, ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?)`,
           [
             uuidv4(),
             responseId,
@@ -141,7 +230,7 @@ export const processCodeGeneration = async (
           codeAnalysis.riskScore > 60 ? 'crítico' : codeAnalysis.riskScore > 40 ? 'alto' : 'médio',
           `${codeAnalysis.vulnerabilities.length} vulnerabilidade(s) detectada(s)`,
           {
-            vulnerabilities: codeAnalysis.vulnerabilities.map((v: any) => v.type),
+            vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
             riskScore: codeAnalysis.riskScore,
           },
           request.userIp
@@ -172,12 +261,13 @@ export const processCodeGeneration = async (
       secureCode,
       createdAt: new Date().toISOString(),
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Log do erro
+    const message = getErrorMessage(error);
     await logSecurityEvent(
       'code_generation_error',
       'médio',
-      error.message,
+      message,
       { prompt: request.prompt },
       request.userIp
     );
@@ -200,7 +290,7 @@ export const analyzeExistingCode = async (
     for (const vuln of codeAnalysis.vulnerabilities) {
       await run(
         `INSERT INTO code_corrections (id, response_id, vulnerability_type, vulnerability_description, owasp_category)
-         VALUES (?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?)`,
         [
           uuidv4(),
           responseId,
@@ -216,7 +306,7 @@ export const analyzeExistingCode = async (
       codeAnalysis.riskScore > 60 ? 'crítico' : codeAnalysis.riskScore > 40 ? 'alto' : 'médio',
       `${codeAnalysis.vulnerabilities.length} vulnerabilidade(s) detectada(s) durante auditoria de código`,
       {
-        vulnerabilities: codeAnalysis.vulnerabilities.map((v: any) => v.type),
+        vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
         riskScore: codeAnalysis.riskScore,
       },
       request.userIp
@@ -251,19 +341,19 @@ export const analyzeExistingCode = async (
 /**
  * Obtém estatísticas de segurança
  */
-export const getSecurityStatistics = async (): Promise<any> => {
-  const stats = await getOne('SELECT * FROM statistics WHERE id = ?', ['stats']);
-  const recentLogs = await query('SELECT * FROM security_logs ORDER BY created_at DESC LIMIT 10');
+export const getSecurityStatistics = async (): Promise<SecurityStatistics> => {
+  const stats = await getOne<StatisticsRow>('SELECT * FROM statistics WHERE id = ?', ['stats']);
+  const recentLogs = await query<SecurityLogRow>('SELECT * FROM security_logs ORDER BY created_at DESC LIMIT 10');
 
   // Contar vulnerabilidades por tipo
-  const vulnByType = await query(`
+  const vulnByType = await query<VulnerabilityTypeCount>(`
     SELECT vulnerability_type, COUNT(*) as count FROM code_corrections
     GROUP BY vulnerability_type
     ORDER BY count DESC
   `);
 
   // Contar riscos por nível
-  const riskByLevel = await query(`
+  const riskByLevel = await query<RiskLevelCount>(`
     SELECT risk_level, COUNT(*) as count FROM prompts
     GROUP BY risk_level
   `);
@@ -279,13 +369,13 @@ export const getSecurityStatistics = async (): Promise<any> => {
 /**
  * Obtém histórico de prompts
  */
-export const getPromptHistory = async (limit: number = 50): Promise<any[]> => {
-  return await query(
+export const getPromptHistory = async (limit: number = 50): Promise<PromptHistoryRow[]> => {
+  return await query<PromptHistoryRow>(
     `SELECT p.*, c.id as code_response_id, c.generated_code, c.language, c.is_vulnerable
-     FROM prompts p
-     LEFT JOIN code_responses c ON p.id = c.prompt_id
-     ORDER BY p.created_at DESC
-     LIMIT ?`,
+    FROM prompts p
+    LEFT JOIN code_responses c ON p.id = c.prompt_id
+    ORDER BY p.created_at DESC
+    LIMIT ?`,
     [limit]
   );
 };
@@ -293,17 +383,17 @@ export const getPromptHistory = async (limit: number = 50): Promise<any[]> => {
 /**
  * Obtém detalhes de um prompt específico
  */
-export const getPromptDetails = async (promptId: string): Promise<any> => {
-  const prompt = await getOne('SELECT * FROM prompts WHERE id = ?', [promptId]);
+export const getPromptDetails = async (promptId: string): Promise<PromptDetails | null> => {
+  const prompt = await getOne<PromptRow>('SELECT * FROM prompts WHERE id = ?', [promptId]);
   if (!prompt) return null;
 
-  const codeResponse = await getOne(
+  const codeResponse = await getOne<CodeResponseRow>(
     'SELECT * FROM code_responses WHERE prompt_id = ?',
     [promptId]
   );
 
   const vulnerabilities = codeResponse
-    ? await query('SELECT * FROM code_corrections WHERE response_id = ?', [codeResponse.id])
+    ? await query<CodeCorrectionRow>('SELECT * FROM code_corrections WHERE response_id = ?', [codeResponse.id])
     : [];
 
   return {

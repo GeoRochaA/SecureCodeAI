@@ -10,6 +10,10 @@ import {
 import { checkAIServiceHealth } from '../ai/service.js';
 import { analyzePromptSecurity } from '../security/guardrails.js';
 
+const getErrorMessage = (error: unknown): string => {
+  return error instanceof Error ? error.message : String(error);
+};
+
 export const setupRoutes = (app: Express) => {
   // ==================== API Endpoints ====================
 
@@ -33,9 +37,9 @@ export const setupRoutes = (app: Express) => {
       });
 
       return res.json(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       return res.status(400).json({
-        error: error.message,
+        error: getErrorMessage(error),
         timestamp: new Date().toISOString(),
       });
     }

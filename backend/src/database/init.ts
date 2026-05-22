@@ -11,6 +11,13 @@ const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/sec
 
 export let db: sqlite3.Database;
 
+type SqlParam = string | number | boolean | Buffer | null;
+
+interface RunResult {
+  id: number;
+  changes: number;
+}
+
 export const initializeDatabase = (): Promise<void> => {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -112,16 +119,16 @@ const createTables = async (): Promise<void> => {
   }
 };
 
-export const query = (sql: string, params: any[] = []): Promise<any> => {
+export const query = <T = unknown>(sql: string, params: SqlParam[] = []): Promise<T[]> => {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
       if (err) reject(err);
-      else resolve(rows);
+      else resolve(rows as T[]);
     });
   });
 };
 
-export const run = (sql: string, params: any[] = []): Promise<any> => {
+export const run = (sql: string, params: SqlParam[] = []): Promise<RunResult> => {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function(err) {
       if (err) reject(err);
@@ -130,11 +137,11 @@ export const run = (sql: string, params: any[] = []): Promise<any> => {
   });
 };
 
-export const getOne = (sql: string, params: any[] = []): Promise<any> => {
+export const getOne = <T = unknown>(sql: string, params: SqlParam[] = []): Promise<T | undefined> => {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
       if (err) reject(err);
-      else resolve(row);
+      else resolve(row as T | undefined);
     });
   });
 };

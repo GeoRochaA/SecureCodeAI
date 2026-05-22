@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { run, query } from '../database/init.js';
 
 export interface SecurityAnalysis {
-  promptId?: string;
+  promptId: string;
   isInjectionDetected: boolean;
   injectionType?: string;
   riskLevel: 'baixo' | 'médio' | 'alto' | 'crítico';
@@ -44,7 +44,7 @@ const INJECTION_PATTERNS = [
 // Padrões de detecção de código vulnerável
 const VULNERABILITY_PATTERNS = [
   {
-    pattern: /SELECT\s+.*FROM\s+.*WHERE\s+.*['"]?\$\{?(?:id|query|param)[\}']?/gi,
+    pattern: /SELECT\s+.*FROM\s+.*WHERE\s+.*['"]?\$\{?(?:id|query|param)[}']?/gi,
     type: 'SQL_INJECTION',
     description: 'SQL Injection: Concatenação direta de variáveis em queries SQL',
     owasp: 'A03:2021 - Injection',
@@ -144,7 +144,7 @@ export const analyzePromptSecurity = async (prompt: string): Promise<SecurityAna
   await run(
     `INSERT INTO prompts (id, user_input, risk_level, is_injection_detected, injection_type)
      VALUES (?, ?, ?, ?, ?)`,
-    [promptId, prompt, riskLevel, injectionType ? 1 : 0, injectionType]
+    [promptId, prompt, riskLevel, injectionType ? 1 : 0, injectionType ?? null]
   );
 
   return {
@@ -237,7 +237,7 @@ export const generateSecureCode = (vulnerableCode: string, language: string): st
   if (language.toLowerCase() === 'sql') {
     // SQL: Converter para prepared statements
     secureCode = secureCode.replace(
-      /SELECT\s+\*\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*['"]?\$\{?(\w+)[\}']?/gi,
+      /SELECT\s+\*\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*['"]?\$\{?(\w+)[}']?/gi,
       'SELECT * FROM $1 WHERE $2 = ?\n// Use prepared statements: connection.execute(sql, [param])'
     );
   }
@@ -300,7 +300,7 @@ export const logSecurityEvent = async (
   eventType: string,
   severity: 'baixo' | 'médio' | 'alto' | 'crítico',
   message: string,
-  details?: any,
+  details?: unknown,
   ipAddress?: string
 ): Promise<void> => {
   const id = uuidv4();
@@ -327,8 +327,8 @@ export const logSecurityEvent = async (
  * Atualizar estatísticas
  */
 export const updateStatistics = async (): Promise<void> => {
-  const prompts = await query('SELECT COUNT(*) as count FROM prompts');
-  const vulnerabilities = await query('SELECT COUNT(*) as count FROM code_corrections');
+  const prompts = await query<{ count: number }>('SELECT COUNT(*) as count FROM prompts');
+  const vulnerabilities = await query<{ count: number }>('SELECT COUNT(*) as count FROM code_corrections');
   
   await run(
     `UPDATE statistics SET 

@@ -5,6 +5,10 @@ import { initializeDatabase } from './database/init.js';
 import { setupRoutes } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
+interface ListenError extends Error {
+  code?: string;
+}
+
 dotenv.config();
 
 const app: Express = express();
@@ -45,7 +49,7 @@ const listenOnPort = (port: number) => {
       resolve();
     });
 
-    server.on('error', (error: any) => {
+    server.on('error', (error: Error) => {
       reject(error);
     });
   });
@@ -59,8 +63,9 @@ const startServer = async () => {
     try {
       await listenOnPort(port);
       return;
-    } catch (error: any) {
-      if (error.code === 'EADDRINUSE') {
+    } catch (error: unknown) {
+      const listenError = error as ListenError;
+      if (listenError.code === 'EADDRINUSE') {
         console.warn(`Porta ${port} ocupada, tentando próxima porta...`);
         continue;
       }
