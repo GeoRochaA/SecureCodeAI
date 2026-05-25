@@ -11,6 +11,8 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     command: serve
+    networks:
+      - securecode-network
 
   # Backend API
   backend:
@@ -25,6 +27,8 @@ services:
       - AI_PROVIDER=ollama
       - AI_MODEL=llama3
       - AI_BASE_URL=http://ollama:11434
+      - AI_REQUEST_TIMEOUT_MS=300000
+      - AI_MAX_TOKENS=900
       - DATABASE_PATH=/app/data/securecode.db
       - CORS_ORIGIN=http://localhost:5173
     depends_on:
@@ -40,7 +44,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "5173:80"
     environment:
       - VITE_API_URL=http://localhost:3000
     depends_on:

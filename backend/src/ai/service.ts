@@ -9,6 +9,8 @@ export interface AIResponse {
 const AI_PROVIDER = process.env.AI_PROVIDER || 'ollama';
 const AI_MODEL = process.env.AI_MODEL || 'llama3';
 const AI_BASE_URL = process.env.AI_BASE_URL || 'http://localhost:11434';
+const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 300000);
+const AI_MAX_TOKENS = Number(process.env.AI_MAX_TOKENS || 900);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 /**
@@ -29,9 +31,17 @@ export const generateCodeWithAI = async (
 - Comentarios de seguranca quando apropriado
 
 Retorne no formato:
-[LANGUAGE]codigo_aqui[/LANGUAGE][EXPLANATION]explicacao_aqui[/EXPLANATION]`
+[LANGUAGE]javascript[/LANGUAGE]
+[CODE]
+codigo_aqui
+[/CODE]
+[EXPLANATION]explicacao_aqui[/EXPLANATION]`
     : `Voce e um assistente de programacao. Gere codigo completo e funcional com base no prompt do usuario. Use comentarios apenas quando necessarios. Retorne no formato:
-[LANGUAGE]codigo_aqui[/LANGUAGE][EXPLANATION]explicacao_aqui[/EXPLANATION]`;
+[LANGUAGE]javascript[/LANGUAGE]
+[CODE]
+codigo_aqui
+[/CODE]
+[EXPLANATION]explicacao_aqui[/EXPLANATION]`;
 
   try {
     if (AI_PROVIDER === 'openai' && OPENAI_API_KEY) {
@@ -61,10 +71,13 @@ const generateWithOllama = async (userPrompt: string, systemPrompt: string): Pro
     model: AI_MODEL,
     prompt: fullPrompt,
     stream: false,
-    temperature: 0.7,
-    top_p: 0.9,
+    options: {
+      temperature: 0.7,
+      top_p: 0.9,
+      num_predict: AI_MAX_TOKENS,
+    },
   }, {
-    timeout: 60000,
+    timeout: AI_REQUEST_TIMEOUT_MS,
   });
 
   const generatedText = response.data.response || '';
@@ -171,8 +184,13 @@ const parseAIResponse = (text: string): AIResponse => {
   const languageMatch = text.match(/\[LANGUAGE\]([a-zA-Z0-9_+-]+)\[\/LANGUAGE\]/i);
   const language = languageMatch ? languageMatch[1].toLowerCase() : 'javascript';
 
-  const codeMatch = text.match(/\[LANGUAGE\]([\s\S]*?)\[\/LANGUAGE\]/i);
-  const code = codeMatch ? codeMatch[1].trim() : text.trim();
+  const codeMatch = text.match(/\[CODE\]([\s\S]*?)\[\/CODE\]/i);
+  const legacyCodeMatch = text.match(/\[LANGUAGE\]([\s\S]*?)\[\/LANGUAGE\]/i);
+  const code = codeMatch
+    ? codeMatch[1].trim()
+    : legacyCodeMatch && !languageMatch
+      ? legacyCodeMatch[1].trim()
+      : text.trim();
 
   const explanationMatch = text.match(/\[EXPLANATION\]([\s\S]*?)\[\/EXPLANATION\]/i);
   const explanation = explanationMatch ? explanationMatch[1].trim() : 'Código gerado sem explicação detalhada.';

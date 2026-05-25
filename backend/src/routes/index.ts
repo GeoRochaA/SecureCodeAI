@@ -49,7 +49,7 @@ export const setupRoutes = (app: Express) => {
    * POST /api/analyze - Analisa código existente pelo scanner de segurança
    */
   app.post('/api/analyze', asyncHandler(async (req: Request, res: Response) => {
-    const { code, language, safeMode } = req.body;
+    const { code, language } = req.body;
 
     if (!code || !language) {
       return res.status(400).json({ error: 'Código e linguagem são obrigatórios' });
@@ -59,7 +59,6 @@ export const setupRoutes = (app: Express) => {
     const result = await analyzeExistingCode({
       code,
       language,
-      safeMode: safeMode !== false,
       userIp,
     });
 

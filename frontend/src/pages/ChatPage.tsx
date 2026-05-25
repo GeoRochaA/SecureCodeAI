@@ -93,7 +93,6 @@ const ChatPage: React.FC = () => {
       const res = await axios.post('/api/analyze', {
         code: codeInput,
         language,
-        safeMode: mode === 'secure',
       })
       setAnalysis(res.data)
     } catch (err: any) {
@@ -106,7 +105,7 @@ const ChatPage: React.FC = () => {
   const summaryCards = useMemo(
     () => [
       { label: 'Vulnerabilidades', value: vulnerabilities.length },
-      { label: 'Modo', value: mode === 'secure' ? 'Seguro' : 'Vulnerável' },
+      { label: 'Modo de geração', value: mode === 'secure' ? 'Seguro' : 'Vulnerável' },
       { label: 'Injeção', value: currentOutcome?.securityAnalysis.isInjectionDetected ? 'Detectada' : 'Não detectada' },
     ],
     [vulnerabilities.length, mode, currentOutcome?.securityAnalysis.isInjectionDetected]
@@ -139,52 +138,53 @@ const ChatPage: React.FC = () => {
         <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-4">
             <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
-              <div className="flex flex-wrap gap-3 items-center mb-6">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="radio"
-                    name="mode"
-                    value="secure"
-                    checked={mode === 'secure'}
-                    onChange={() => setMode('secure')}
-                    className="accent-cyber-blue"
-                  />
-                  Modo Seguro
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="radio"
-                    name="mode"
-                    value="vulnerable"
-                    checked={mode === 'vulnerable'}
-                    onChange={() => setMode('vulnerable')}
-                    className="accent-cyber-red"
-                  />
-                  Modo Vulnerável
-                </label>
-                <span className="text-xs text-slate-500">Modo vulnerável desativa correções automáticas para teste adversarial.</span>
-              </div>
-
               {view === 'generate' ? (
                 <div className="space-y-4">
-                  <label className="text-sm font-semibold text-slate-200">Descrição do cenário</label>
-                  <textarea
-                    value={scenarioDescription}
-                    onChange={(e) => setScenarioDescription(e.target.value)}
-                    rows={6}
-                    className="input-base w-full resize-none"
-                  />
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={executeGenerate} className="btn-primary" disabled={loading}>
-                      {loading ? 'Processando...' : 'Gerar sistema de teste'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setScenarioDescription(defaultScenario)}
-                      className="btn-secondary"
-                    >
-                      Exemplo de cenário
-                    </button>
+                  <div className="flex flex-wrap gap-3 items-center mb-6">
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="radio"
+                        name="mode"
+                        value="secure"
+                        checked={mode === 'secure'}
+                        onChange={() => setMode('secure')}
+                        className="accent-cyber-blue"
+                      />
+                      Modo Seguro
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="radio"
+                        name="mode"
+                        value="vulnerable"
+                        checked={mode === 'vulnerable'}
+                        onChange={() => setMode('vulnerable')}
+                        className="accent-cyber-red"
+                      />
+                      Modo Vulnerável
+                    </label>
+                    <span className="text-xs text-slate-500">Modo definido apenas para a geração de sistemas. A auditoria sempre executa análise completa.</span>
+                  </div>
+                  <div className="space-y-4">
+                    <label className="text-sm font-semibold text-slate-200">Descrição do cenário</label>
+                    <textarea
+                      value={scenarioDescription}
+                      onChange={(e) => setScenarioDescription(e.target.value)}
+                      rows={6}
+                      className="input-base w-full resize-none"
+                    />
+                    <div className="flex flex-wrap gap-3">
+                      <button onClick={executeGenerate} className="btn-primary" disabled={loading}>
+                        {loading ? 'Processando...' : 'Gerar sistema de teste'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScenarioDescription(defaultScenario)}
+                        className="btn-secondary"
+                      >
+                        Exemplo de cenário
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -220,23 +220,12 @@ const ChatPage: React.FC = () => {
 
           <aside className="space-y-4">
             <div className="rounded-2xl border border-slate-700 bg-slate-950 p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-cyber-blue">Security Operations</p>
-              <h2 className="text-xl font-semibold text-white mt-3">Visão geral de segurança</h2>
-              <p className="text-sm text-slate-400 mt-3">Use este painel para avaliar riscos, mitigar vulnerabilidades e documentar eventos em tempo real.</p>
+              <p className="text-sm font-semibold text-white">Auditoria em tempo real</p>
+              <p className="text-sm text-slate-400 mt-3">O scanner classifica, detecta e corrige vulnerabilidades sem dependência de modo.</p>
             </div>
-            <div className="grid gap-3">
-              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                <p className="font-semibold text-white">Proteção de LLM</p>
-                <p className="text-sm text-slate-400 mt-2">Detecta injeções e manipulações de prompt antes que o código seja entregue.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                <p className="font-semibold text-white">Mitigação automática</p>
-                <p className="text-sm text-slate-400 mt-2">Corrige o código inseguro assim que as falhas são identificadas.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                <p className="font-semibold text-white">Avaliação ofensiva</p>
-                <p className="text-sm text-slate-400 mt-2">Teste cenários adversariais com o modo vulnerável e compare resultados.</p>
-              </div>
+            <div className="rounded-2xl border border-slate-700 bg-slate-950 p-5">
+              <p className="text-sm font-semibold text-white">OWASP Top 10</p>
+              <p className="text-sm text-slate-400 mt-3">Todas as análises exibem categorias OWASP e severidades associadas.</p>
             </div>
           </aside>
         </div>
@@ -288,7 +277,7 @@ const ChatPage: React.FC = () => {
 
                 <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
                   <p className="text-sm text-slate-400">Descrição da análise</p>
-                  <p className="mt-3 text-sm leading-6 text-slate-300">{currentOutcome.explanation || 'O resultado detalha os riscos identificados e as ações de mitigação recomendadas.'}</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-300">{currentOutcome.explanation || 'Resultado detalhado da auditoria de segurança, com mitigação e correções.'}</p>
                 </div>
               </div>
 

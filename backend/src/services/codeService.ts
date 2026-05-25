@@ -19,7 +19,6 @@ export interface CodeGenerationRequest {
 export interface CodeAuditRequest {
   code: string;
   language: string;
-  safeMode: boolean;
   userIp?: string;
 }
 
@@ -284,7 +283,7 @@ export const analyzeExistingCode = async (
   const codeAnalysis = await analyzeCodeSecurity(request.code, request.language);
   let secureCode: string | undefined;
 
-  if (codeAnalysis.isVulnerable && request.safeMode) {
+  if (codeAnalysis.isVulnerable) {
     secureCode = generateSecureCode(request.code, request.language);
 
     for (const vuln of codeAnalysis.vulnerabilities) {
@@ -320,9 +319,7 @@ export const analyzeExistingCode = async (
     prompt: `Auditoria de código em ${request.language}`,
     code: request.code,
     language: request.language,
-    explanation: request.safeMode
-      ? 'O código passou por uma auditoria de segurança e recebeu correções automáticas quando necessário.'
-      : 'O código foi analisado sem aplicação de correções automáticas.',
+    explanation: 'O código passou por uma auditoria de segurança com correções automáticas quando necessário.',
     securityAnalysis: {
       promptRiskLevel: codeAnalysis.isVulnerable ? 'alto' : 'baixo',
       isInjectionDetected: false,

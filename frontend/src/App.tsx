@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import AuditPage from './pages/ChatPage'
-import DashboardPage from './pages/DashboardPage'
 import LogsPage from './pages/LogsPage'
 import Header from './components/Header'
 import './App.css'
 
-type Page = 'scanner' | 'dashboard' | 'logs'
+type Page = 'scanner' | 'logs'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('scanner')
@@ -14,8 +13,6 @@ function App() {
     switch (currentPage) {
       case 'scanner':
         return <AuditPage />
-      case 'dashboard':
-        return <DashboardPage />
       case 'logs':
         return <LogsPage />
       default:
