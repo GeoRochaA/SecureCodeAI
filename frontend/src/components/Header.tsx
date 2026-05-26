@@ -11,8 +11,7 @@ const Header: React.FC<HeaderProps> = ({ onNavigate, currentPage }) => {
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <div className="text-2xl font-semibold text-slate-100">SecureCode Audit</div>
-            <p className="text-sm text-slate-400">Ferramenta de auditoria de código e simulação de sistemas para segurança em IA generativa.</p>
+            <div className="text-2xl font-semibold text-cyber-blue">SC Scanner</div>
           </div>
 
           <nav className="flex gap-3 flex-wrap">

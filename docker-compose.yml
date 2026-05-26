@@ -25,10 +25,10 @@ services:
       - PORT=3000
       - NODE_ENV=production
       - AI_PROVIDER=ollama
-      - AI_MODEL=llama3
+      - AI_MODEL=qwen2.5-coder:0.5b
       - AI_BASE_URL=http://ollama:11434
       - AI_REQUEST_TIMEOUT_MS=300000
-      - AI_MAX_TOKENS=900
+      - AI_MAX_TOKENS=550
       - DATABASE_PATH=/app/data/securecode.db
       - CORS_ORIGIN=http://localhost:5173
     depends_on:

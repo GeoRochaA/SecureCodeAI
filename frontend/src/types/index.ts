@@ -1,10 +1,11 @@
-// Tipos da aplicação
-
 export interface CodeVulnerability {
   type: string
   description: string
   owaspCategory: string
-  severity: 'baixo' | 'médio' | 'alto' | 'crítico'
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  fileName?: string
+  lineNumber?: number
+  recommendation?: string
 }
 
 export interface SecurityAnalysis {

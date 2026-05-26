@@ -3,6 +3,7 @@ import { run, getOne, query } from '../database/init.js';
 import {
   analyzePromptSecurity,
   analyzeCodeSecurity,
+  detectCodeLanguage,
   type CodeVulnerability,
   generateSecureCode,
   logSecurityEvent,
@@ -18,7 +19,7 @@ export interface CodeGenerationRequest {
 
 export interface CodeAuditRequest {
   code: string;
-  language: string;
+  language?: string;
   userIp?: string;
 }
 
@@ -89,10 +90,10 @@ interface PromptHistoryRow {
   is_injection_detected: number;
   injection_type: string | null;
   created_at: string;
-  code_response_id: string | null;
-  generated_code: string | null;
-  language: string | null;
-  is_vulnerable: number | null;
+  code_response_id?: string | null;
+  generated_code?: string | null;
+  language?: string | null;
+  is_vulnerable?: number | null;
 }
 
 interface PromptRow {
@@ -133,144 +134,125 @@ const getErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
-/**
- * Processa uma solicitação de geração de código
- */
+const buildAuditExplanation = (vulnerabilities: CodeVulnerability[], riskScore: number): string => {
+  const riskLabel = riskScore <= 25 ? 'LOW' : riskScore <= 50 ? 'MEDIUM' : riskScore <= 75 ? 'HIGH' : 'CRITICAL';
+  if (vulnerabilities.length === 0) {
+    return `Audit complete. Risk ${riskLabel} (${riskScore}/100). No findings detected.`;
+  }
+
+  const topFindings = vulnerabilities
+    .slice(0, 3)
+    .map((vulnerability) => `${vulnerability.severity.toUpperCase()} ${vulnerability.type}`)
+    .join(' | ');
+
+  return `Audit complete. Risk ${riskLabel} (${riskScore}/100). Findings: ${vulnerabilities.length}. ${topFindings}.`;
+};
+
+const persistFindings = async (responseId: string, vulnerabilities: CodeVulnerability[]) => {
+  for (const vuln of vulnerabilities) {
+    await run(
+      `INSERT INTO code_corrections (id, response_id, vulnerability_type, vulnerability_description, owasp_category)
+       VALUES (?, ?, ?, ?, ?)`,
+      [uuidv4(), responseId, vuln.type, vuln.description, vuln.owaspCategory]
+    );
+  }
+};
+
+const riskSeverity = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+  if (riskScore > 60) return 'critical';
+  if (riskScore > 40) return 'high';
+  if (riskScore > 0) return 'medium';
+  return 'low';
+};
+
 export const processCodeGeneration = async (
   request: CodeGenerationRequest
 ): Promise<CodeGenerationResponse> => {
   const responseId = uuidv4();
+
   try {
-    // 1. Análise de segurança do prompt
     const promptAnalysis = await analyzePromptSecurity(request.prompt);
 
-    // Se detectou injection, bloquear imediatamente
-    if (promptAnalysis.isInjectionDetected) {
+    if (promptAnalysis.isInjectionDetected || promptAnalysis.riskLevel === 'critical') {
       await logSecurityEvent(
-        'injection_detected',
-        'crítico',
-        `Prompt injection detectado: ${promptAnalysis.injectionType}`,
-        { prompt: request.prompt, type: promptAnalysis.injectionType },
+        promptAnalysis.isInjectionDetected ? 'injection_detected' : 'high_risk_prompt',
+        'critical',
+        promptAnalysis.injectionType || 'High Risk Prompt',
+        { prompt: request.prompt, details: promptAnalysis.details },
         request.userIp
       );
 
-      throw new Error(`🚨 ATAQUE BLOQUEADO: Prompt Injection detectada (${promptAnalysis.injectionType})`);
+      throw new Error('Prompt blocked by guardrails');
     }
 
-    // Se risco é crítico, bloquear
-    if (promptAnalysis.riskLevel === 'crítico') {
-      await logSecurityEvent(
-        'high_risk_prompt',
-        'crítico',
-        'Prompt com risco crítico detectado',
-        { prompt: request.prompt },
-        request.userIp
-      );
-
-      throw new Error('🚨 ATAQUE BLOQUEADO: Prompt com risco crítico detectado');
-    }
-
-    // 2. Gerar código com IA
     let aiResponse;
     try {
       aiResponse = await generateCodeWithAI(request.prompt, request.safeMode);
     } catch (aiError) {
       await logSecurityEvent(
         'ai_service_error',
-        'médio',
-        'Erro ao comunicar com serviço de IA',
+        'medium',
+        'AI service unavailable',
         { error: String(aiError) },
         request.userIp
       );
-      throw new Error('Erro ao gerar código. Verifique se Ollama está rodando em http://localhost:11434');
+      throw new Error('AI service unavailable. Check Ollama at http://localhost:11434');
     }
 
-    // 3. Análise de segurança do código gerado
-    const codeAnalysis = await analyzeCodeSecurity(aiResponse.code, aiResponse.language);
+    const detectedLanguage = detectCodeLanguage(aiResponse.code);
+    const codeAnalysis = await analyzeCodeSecurity(aiResponse.code, detectedLanguage);
+    const explanation = buildAuditExplanation(codeAnalysis.vulnerabilities, codeAnalysis.riskScore);
 
-    // Salvar resposta no banco
     await run(
       `INSERT INTO code_responses (id, prompt_id, generated_code, language, is_vulnerable, vulnerabilities)
-      VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         responseId,
         promptAnalysis.promptId,
         aiResponse.code,
-        aiResponse.language,
+        detectedLanguage,
         codeAnalysis.isVulnerable ? 1 : 0,
         JSON.stringify(codeAnalysis.vulnerabilities),
       ]
     );
 
-    // 4. Se vulnerável, gerar código seguro
     let secureCode: string | undefined;
-    if (codeAnalysis.isVulnerable && request.safeMode) {
-      secureCode = generateSecureCode(aiResponse.code, aiResponse.language);
-
-      // Salvar correções
-      for (const vuln of codeAnalysis.vulnerabilities) {
-        await run(
-          `INSERT INTO code_corrections (id, response_id, vulnerability_type, vulnerability_description, owasp_category)
-          VALUES (?, ?, ?, ?, ?)`,
-          [
-            uuidv4(),
-            responseId,
-            vuln.type,
-            vuln.description,
-            vuln.owaspCategory,
-          ]
-        );
-      }
-
-      // Log de vulnerabilidades detectadas
-      if (codeAnalysis.vulnerabilities.length > 0) {
-        await logSecurityEvent(
-          'vulnerability_detected',
-          codeAnalysis.riskScore > 60 ? 'crítico' : codeAnalysis.riskScore > 40 ? 'alto' : 'médio',
-          `${codeAnalysis.vulnerabilities.length} vulnerabilidade(s) detectada(s)`,
-          {
-            vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
-            riskScore: codeAnalysis.riskScore,
-          },
-          request.userIp
-        );
-      }
+    if (codeAnalysis.isVulnerable) {
+      secureCode = generateSecureCode(aiResponse.code, detectedLanguage);
+      await persistFindings(responseId, codeAnalysis.vulnerabilities);
+      await logSecurityEvent(
+        'vulnerability_detected',
+        riskSeverity(codeAnalysis.riskScore),
+        `${codeAnalysis.vulnerabilities.length} findings detected`,
+        {
+          vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
+          riskScore: codeAnalysis.riskScore,
+        },
+        request.userIp
+      );
     }
 
-    // Atualizar estatísticas
     await updateStatistics();
 
     return {
       id: responseId,
       prompt: request.prompt,
       code: aiResponse.code,
-      language: aiResponse.language,
-      explanation: aiResponse.explanation,
+      language: detectedLanguage,
+      explanation,
       securityAnalysis: {
         promptRiskLevel: promptAnalysis.riskLevel,
         isInjectionDetected: promptAnalysis.isInjectionDetected,
         injectionType: promptAnalysis.injectionType,
         injectionDetails: promptAnalysis.details,
       },
-      codeAnalysis: {
-        isVulnerable: codeAnalysis.isVulnerable,
-        vulnerabilities: codeAnalysis.vulnerabilities,
-        riskScore: codeAnalysis.riskScore,
-      },
+      codeAnalysis,
       secureCode,
       createdAt: new Date().toISOString(),
     };
   } catch (error: unknown) {
-    // Log do erro
     const message = getErrorMessage(error);
-    await logSecurityEvent(
-      'code_generation_error',
-      'médio',
-      message,
-      { prompt: request.prompt },
-      request.userIp
-    );
-
+    await logSecurityEvent('code_generation_error', 'medium', message, { prompt: request.prompt }, request.userIp);
     throw error;
   }
 };
@@ -279,31 +261,16 @@ export const analyzeExistingCode = async (
   request: CodeAuditRequest
 ): Promise<CodeAuditResponse> => {
   const responseId = uuidv4();
-
-  const codeAnalysis = await analyzeCodeSecurity(request.code, request.language);
-  let secureCode: string | undefined;
+  const detectedLanguage = request.language || detectCodeLanguage(request.code);
+  const codeAnalysis = await analyzeCodeSecurity(request.code, detectedLanguage);
+  const secureCode = codeAnalysis.isVulnerable ? generateSecureCode(request.code, detectedLanguage) : undefined;
 
   if (codeAnalysis.isVulnerable) {
-    secureCode = generateSecureCode(request.code, request.language);
-
-    for (const vuln of codeAnalysis.vulnerabilities) {
-      await run(
-        `INSERT INTO code_corrections (id, response_id, vulnerability_type, vulnerability_description, owasp_category)
-        VALUES (?, ?, ?, ?, ?)`,
-        [
-          uuidv4(),
-          responseId,
-          vuln.type,
-          vuln.description,
-          vuln.owaspCategory,
-        ]
-      );
-    }
-
+    await persistFindings(responseId, codeAnalysis.vulnerabilities);
     await logSecurityEvent(
       'code_audit_vulnerability',
-      codeAnalysis.riskScore > 60 ? 'crítico' : codeAnalysis.riskScore > 40 ? 'alto' : 'médio',
-      `${codeAnalysis.vulnerabilities.length} vulnerabilidade(s) detectada(s) durante auditoria de código`,
+      riskSeverity(codeAnalysis.riskScore),
+      `${codeAnalysis.vulnerabilities.length} findings detected during code audit`,
       {
         vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
         riskScore: codeAnalysis.riskScore,
@@ -316,40 +283,31 @@ export const analyzeExistingCode = async (
 
   return {
     id: responseId,
-    prompt: `Auditoria de código em ${request.language}`,
+    prompt: `Code audit (${detectedLanguage})`,
     code: request.code,
-    language: request.language,
-    explanation: 'O código passou por uma auditoria de segurança com correções automáticas quando necessário.',
+    language: detectedLanguage,
+    explanation: buildAuditExplanation(codeAnalysis.vulnerabilities, codeAnalysis.riskScore),
     securityAnalysis: {
-      promptRiskLevel: codeAnalysis.isVulnerable ? 'alto' : 'baixo',
+      promptRiskLevel: codeAnalysis.isVulnerable ? 'high' : 'low',
       isInjectionDetected: false,
       injectionDetails: [],
     },
-    codeAnalysis: {
-      isVulnerable: codeAnalysis.isVulnerable,
-      vulnerabilities: codeAnalysis.vulnerabilities,
-      riskScore: codeAnalysis.riskScore,
-    },
+    codeAnalysis,
     secureCode,
     createdAt: new Date().toISOString(),
   };
 };
 
-/**
- * Obtém estatísticas de segurança
- */
 export const getSecurityStatistics = async (): Promise<SecurityStatistics> => {
   const stats = await getOne<StatisticsRow>('SELECT * FROM statistics WHERE id = ?', ['stats']);
   const recentLogs = await query<SecurityLogRow>('SELECT * FROM security_logs ORDER BY created_at DESC LIMIT 10');
 
-  // Contar vulnerabilidades por tipo
   const vulnByType = await query<VulnerabilityTypeCount>(`
     SELECT vulnerability_type, COUNT(*) as count FROM code_corrections
     GROUP BY vulnerability_type
     ORDER BY count DESC
   `);
 
-  // Contar riscos por nível
   const riskByLevel = await query<RiskLevelCount>(`
     SELECT risk_level, COUNT(*) as count FROM prompts
     GROUP BY risk_level
@@ -363,23 +321,17 @@ export const getSecurityStatistics = async (): Promise<SecurityStatistics> => {
   };
 };
 
-/**
- * Obtém histórico de prompts
- */
 export const getPromptHistory = async (limit: number = 50): Promise<PromptHistoryRow[]> => {
   return await query<PromptHistoryRow>(
     `SELECT p.*, c.id as code_response_id, c.generated_code, c.language, c.is_vulnerable
-    FROM prompts p
-    LEFT JOIN code_responses c ON p.id = c.prompt_id
-    ORDER BY p.created_at DESC
-    LIMIT ?`,
+     FROM prompts p
+     LEFT JOIN code_responses c ON p.id = c.prompt_id
+     ORDER BY p.created_at DESC
+     LIMIT ?`,
     [limit]
   );
 };
 
-/**
- * Obtém detalhes de um prompt específico
- */
 export const getPromptDetails = async (promptId: string): Promise<PromptDetails | null> => {
   const prompt = await getOne<PromptRow>('SELECT * FROM prompts WHERE id = ?', [promptId]);
   if (!prompt) return null;
