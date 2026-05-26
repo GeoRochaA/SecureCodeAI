@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useState } from 'react'
 import axios from 'axios'
 import CodeEditor from '../components/CodeEditor'
 
@@ -17,6 +17,8 @@ interface CodeVulnerability {
   recommendation?: string
   fileName?: string
   lineNumber?: number
+  vulnerableSnippet?: string
+  fixedSnippet?: string
 }
 
 interface CodeAnalysis {
@@ -43,17 +45,15 @@ const ChatPage: React.FC = () => {
   const [mode, setMode] = useState<'secure' | 'vulnerable'>('secure')
   const [view, setView] = useState<'scan' | 'generate'>('scan')
   const [scenarioDescription, setScenarioDescription] = useState(defaultScenario)
-  const [codeInput, setCodeInput] = useState('// Cole o codigo ou multiplos arquivos aqui para auditoria.')
-  const [response, setResponse] = useState<AuditResponse | null>(null)
+  const [generatedCode, setGeneratedCode] = useState('')
+  const [generatedLanguage, setGeneratedLanguage] = useState('typescript')
+  const [codeInput, setCodeInput] = useState('// Cole o código ou múltiplos arquivos aqui para auditoria.')
   const [analysis, setAnalysis] = useState<AuditResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const currentOutcome = view === 'generate' ? response : analysis
+  const currentOutcome = analysis
   const vulnerabilities = currentOutcome?.codeAnalysis?.vulnerabilities || []
-  const showCodeComparison = Boolean(currentOutcome?.secureCode)
-  const showGeneratedCode = Boolean(view === 'generate' && currentOutcome?.code && !showCodeComparison)
-  const riskScore = currentOutcome?.codeAnalysis?.riskScore ?? 0
   const detectedLanguage = currentOutcome?.language || 'typescript'
 
   const executeGenerate = async () => {
@@ -64,7 +64,6 @@ const ChatPage: React.FC = () => {
 
     setLoading(true)
     setError('')
-    setResponse(null)
     setAnalysis(null)
 
     try {
@@ -72,8 +71,8 @@ const ChatPage: React.FC = () => {
         prompt: scenarioDescription,
         safeMode: mode === 'secure',
       })
-      setResponse(res.data)
-      setCodeInput(res.data.code)
+      setGeneratedCode(res.data.code)
+      setGeneratedLanguage(res.data.language || 'typescript')
     } catch (err: any) {
       setError(err.response?.data?.error || 'Falha ao gerar sistema')
     } finally {
@@ -81,15 +80,22 @@ const ChatPage: React.FC = () => {
     }
   }
 
+  const sendGeneratedCodeToScanner = () => {
+    if (!generatedCode.trim()) return
+    setCodeInput(generatedCode)
+    setAnalysis(null)
+    setError('')
+    setView('scan')
+  }
+
   const executeAnalyze = async () => {
     if (!codeInput.trim()) {
-      setError('Cole codigo para auditar.')
+      setError('Cole código para auditar.')
       return
     }
 
     setLoading(true)
     setError('')
-    setResponse(null)
     setAnalysis(null)
 
     try {
@@ -98,20 +104,11 @@ const ChatPage: React.FC = () => {
       })
       setAnalysis(res.data)
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Falha ao auditar codigo')
+      setError(err.response?.data?.error || 'Falha ao auditar código')
     } finally {
       setLoading(false)
     }
   }
-
-  const summaryCards = useMemo(
-    () => [
-      { label: 'Findings', value: vulnerabilities.length },
-      { label: 'Modo de geracao', value: mode === 'secure' ? 'Seguro' : 'Vulneravel' },
-      { label: 'Linguagem detectada', value: detectedLanguage.toUpperCase() },
-    ],
-    [vulnerabilities.length, mode, detectedLanguage]
-  )
 
   return (
     <div className="space-y-6">
@@ -172,22 +169,33 @@ const ChatPage: React.FC = () => {
                 <button onClick={executeGenerate} className="btn-primary" disabled={loading}>
                   {loading ? 'Processando...' : 'Gerar'}
                 </button>
-                <button type="button" onClick={() => setScenarioDescription(defaultScenario)} className="btn-secondary">
-                  Exemplo
-                </button>
+                {generatedCode && (
+                  <button type="button" onClick={sendGeneratedCodeToScanner} className="btn-secondary">
+                    Enviar para Scanner
+                  </button>
+                )}
               </div>
+              {generatedCode && (
+                <div className="pt-2">
+                  <CodeEditor
+                    value={generatedCode}
+                    onValueChange={() => undefined}
+                    language={generatedLanguage}
+                    readOnly
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <label className="text-sm font-semibold text-slate-200">Editor de Codigo</label>
-                <span className="text-xs text-slate-400">Deteccao automatica: JS, TS, PHP, Python, SQL, HTML</span>
+                <label className="text-sm font-semibold text-slate-200">Editor de Código</label>
               </div>
               <CodeEditor
                 value={codeInput}
                 onValueChange={setCodeInput}
                 language={detectedLanguage}
-                placeholder="Cole aqui o codigo ou um conjunto de arquivos"
+                placeholder="Cole aqui o código ou um conjunto de arquivos"
               />
               <button onClick={executeAnalyze} className="btn-primary" disabled={loading}>
                 {loading ? 'Auditando...' : 'Iniciar auditoria'}
@@ -197,6 +205,7 @@ const ChatPage: React.FC = () => {
         </div>
       </section>
 
+      {view === 'scan' && (
       <section className="card space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -210,33 +219,12 @@ const ChatPage: React.FC = () => {
 
         {!currentOutcome && !error && (
           <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6 text-slate-400">
-            Execute uma auditoria para listar vulnerabilidades, severidade, OWASP, arquivo afetado e mitigacao.
+            Execute uma auditoria para visualizar vulnerabilidades e correções.
           </div>
         )}
 
         {currentOutcome && (
           <div className="grid gap-6">
-            <div className="rounded-2xl border border-slate-700 bg-slate-950 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Risk score</p>
-                  <h3 className="mt-2 text-3xl font-semibold text-white">{riskScore} / 100</h3>
-                </div>
-                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getRiskBadge(riskScore)}`}>
-                  {getSeverityLabel(riskScore)}
-                </span>
-              </div>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                {summaryCards.map((item) => (
-                  <div key={item.label} className="rounded-2xl bg-slate-900 p-4">
-                    <p className="text-sm text-slate-400">{item.label}</p>
-                    <p className="mt-2 text-xl font-semibold text-white">{item.value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <div className="rounded-2xl border border-slate-700 bg-slate-950 p-5">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-lg font-semibold text-white">Vulnerabilidades</h3>
@@ -245,21 +233,20 @@ const ChatPage: React.FC = () => {
               {vulnerabilities.length ? (
                 <div className="mt-4 space-y-4">
                   {vulnerabilities.map((item, index) => (
-                    <div key={`${item.type}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                    <div key={`${item.type}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-white">{item.type}</p>
+                          <p className="font-semibold text-white">{translateVulnerability(item.type)}</p>
                           <p className="text-sm text-slate-400 mt-1">{item.owaspCategory}</p>
-                          <p className="text-xs text-slate-500 mt-1">Arquivo afetado: {formatFile(item)}</p>
                         </div>
                         <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getRiskBadge(item.severity)}`}>
-                          {item.severity.toUpperCase()}
+                          {translateSeverity(item.severity)}
                         </span>
                       </div>
-                      <p className="mt-3 text-sm text-slate-300">{item.description}</p>
-                      {item.recommendation && (
-                        <p className="mt-2 text-sm text-cyber-blue">{item.recommendation}</p>
-                      )}
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        <SnippetBlock title="Vulnerável" tone="danger" code={getVulnerableSnippet(item)} />
+                        <SnippetBlock title="Corrigido" tone="safe" code={getFixedSnippet(item)} />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -268,56 +255,72 @@ const ChatPage: React.FC = () => {
               )}
             </div>
 
-            {showGeneratedCode && currentOutcome && (
-              <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                <h4 className="text-sm font-semibold text-slate-200">Codigo gerado</h4>
-                <div className="mt-4">
-                  <CodeEditor
-                    value={currentOutcome.code}
-                    onValueChange={() => undefined}
-                    language={currentOutcome.language}
-                    readOnly
-                  />
-                </div>
-              </div>
-            )}
-
-            {showCodeComparison && (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                  <h4 className="text-sm font-semibold text-slate-200">Codigo original</h4>
-                  <div className="mt-4">
-                    <CodeEditor
-                      value={currentOutcome.code}
-                      onValueChange={() => undefined}
-                      language={currentOutcome.language}
-                      readOnly
-                    />
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                  <h4 className="text-sm font-semibold text-slate-200">Mitigacao</h4>
-                  <div className="mt-4">
-                    <CodeEditor
-                      value={currentOutcome.secureCode ?? ''}
-                      onValueChange={() => undefined}
-                      language={currentOutcome.language}
-                      readOnly
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </section>
+      )}
     </div>
   )
 }
 
-const formatFile = (item: CodeVulnerability) => {
-  const file = item.fileName || 'input'
-  return item.lineNumber ? `${file}:${item.lineNumber}` : file
+interface SnippetBlockProps {
+  title: string
+  tone: 'danger' | 'safe'
+  code: string
+}
+
+const SnippetBlock: React.FC<SnippetBlockProps> = ({ title, tone, code }) => {
+  const color = tone === 'danger' ? 'text-red-300 border-red-500/20 bg-red-500/5' : 'text-emerald-300 border-emerald-500/20 bg-emerald-500/5'
+  const dot = tone === 'danger' ? 'bg-red-400' : 'bg-emerald-400'
+
+  return (
+    <div className={`rounded-xl border p-4 ${color}`}>
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+        {title}
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-200">
+        <code>{code}</code>
+      </pre>
+    </div>
+  )
+}
+
+const translateVulnerability = (type: string) => {
+  const labels: Record<string, string> = {
+    'SQL Injection': 'Injeção SQL',
+    'Reflected XSS': 'XSS Refletido',
+    'Unsafe Code Execution': 'Execução Insegura de Código',
+    'Hardcoded Credential': 'Credencial Hardcoded',
+    'Unsafe JWT Secret': 'JWT Inseguro',
+    'Missing CSRF Protection': 'Falta de Proteção CSRF',
+    'Missing Authorization': 'Falta de Autorização',
+    'Unsafe File Upload': 'Upload Inseguro de Arquivos',
+    'Sensitive Data Exposure': 'Exposição de Dados Sensíveis',
+    'Weak Password Hashing': 'Hash de Senha Fraco',
+    'Missing Input Validation': 'Falta de Validação de Entrada',
+  }
+
+  return labels[type] || type
+}
+
+const translateSeverity = (severity: string) => {
+  const labels: Record<string, string> = {
+    low: 'BAIXO',
+    medium: 'MÉDIO',
+    high: 'ALTO',
+    critical: 'CRÍTICO',
+  }
+
+  return labels[severity.toLowerCase()] || severity.toUpperCase()
+}
+
+const getVulnerableSnippet = (item: CodeVulnerability) => {
+  return item.vulnerableSnippet || item.description || 'Trecho vulnerável detectado.'
+}
+
+const getFixedSnippet = (item: CodeVulnerability) => {
+  return item.fixedSnippet || item.recommendation || 'Aplicar mitigação recomendada.'
 }
 
 const getRiskBadge = (level: string | number) => {
@@ -332,13 +335,6 @@ const getRiskBadge = (level: string | number) => {
     return 'badge-medium'
   }
   return 'badge-low'
-}
-
-const getSeverityLabel = (score: number) => {
-  if (score <= 25) return 'LOW'
-  if (score <= 50) return 'MEDIUM'
-  if (score <= 75) return 'HIGH'
-  return 'CRITICAL'
 }
 
 export default ChatPage

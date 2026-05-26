@@ -17,6 +17,8 @@ export interface CodeVulnerability {
   fileName?: string;
   lineNumber?: number;
   recommendation?: string;
+  vulnerableSnippet?: string;
+  fixedSnippet?: string;
 }
 
 export interface CodeAnalysisResult {
@@ -41,6 +43,7 @@ interface VulnerabilityRule {
   severity: CodeVulnerability['severity'];
   recommendation: string;
   languages?: DetectedLanguage[];
+  shouldFlag?: (source: string, match: RegExpMatchArray) => boolean;
 }
 
 const INJECTION_PATTERNS = [
@@ -53,6 +56,8 @@ const INJECTION_PATTERNS = [
   { pattern: /execute\s+(?:shell|system)\s+command/i, type: 'Command Execution Request' },
   { pattern: /create\s+(?:backdoor|malware|virus)/i, type: 'Malware Request' },
 ];
+
+const LEGITIMATE_SECURITY_TERMS = /\b(?:jwt|csrf|xss|sql injection|sqli|auth|authentication|authorization|upload|middleware|owasp|vulnerability|vulnerable|secure)\b/i;
 
 const FILE_HEADER_PATTERN = /(?:^|\n)\s*(?:\/\/|#|--|<!--)\s*(?:file|arquivo|path):\s*([^\n>-]+)\s*(?:-->)?/gi;
 
@@ -95,6 +100,67 @@ const lineNumberForIndex = (source: string, index: number): number => {
   return source.slice(0, index).split('\n').length;
 };
 
+const getContext = (source: string, index: number, radius = 450): string => {
+  return source.slice(Math.max(0, index - radius), Math.min(source.length, index + radius));
+};
+
+const hasPreparedStatement = (context: string): boolean => {
+  return /\?\s*[,)]|execute\s*\([^)]*,\s*\[|query\s*\([^)]*,\s*\[|prepare\s*\(|bind_param\s*\(|cursor\.execute\s*\([^)]*,\s*\(/i.test(context);
+};
+
+const hasValidation = (context: string): boolean => {
+  return /\b(?:zod|joi|yup|validator|sanitize|escape|schema|parse|safeParse|validate|validation|checkSchema|body\s*\(|param\s*\(|query\s*\()\b/i.test(context);
+};
+
+const hasUploadValidation = (context: string): boolean => {
+  return /fileFilter\s*:|limits\s*:|fileSize\s*:|mimetype|mime|allowedTypes|allowedMime|extension|extname/i.test(context);
+};
+
+const hasAuthMiddleware = (routeCall: string): boolean => {
+  return /requireAuth|authenticate|authorize|requireRole|isAdmin|verifyToken|authMiddleware|passport\.authenticate/i.test(routeCall);
+};
+
+const isPublicAuthRoute = (routeCall: string): boolean => {
+  return /['"`][^'"`]*(?:login|register|signup|refresh|logout|forgot-password|reset-password)[^'"`]*['"`]/i.test(routeCall);
+};
+
+const getRouteCall = (source: string, index: number): string => {
+  const end = source.indexOf('\n', index);
+  return source.slice(index, end === -1 ? Math.min(source.length, index + 320) : Math.min(source.length, end + 320));
+};
+
+const cleanSnippet = (snippet: string): string => {
+  return snippet
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('\n');
+};
+
+const buildFixedSnippet = (type: string, vulnerableSnippet: string): string => {
+  const fallback = 'Aplicar validacao, controle de acesso e sanitizacao conforme o contexto.';
+  const examples: Record<string, string> = {
+    'SQL Injection': 'SELECT * FROM users WHERE id = ?',
+    'Reflected XSS': 'element.textContent = safeValue',
+    'Unsafe Code Execution': 'Use operacoes permitidas por whitelist',
+    'Hardcoded Credential': 'const secret = process.env.SECRET',
+    'Unsafe JWT Secret': 'jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "15m" })',
+    'Missing CSRF Protection': 'app.use(csrfProtection)',
+    'Missing Authorization': 'app.delete("/admin/users/:id", requireAuth, requireRole("admin"), handler)',
+    'Unsafe File Upload': 'multer({ limits, fileFilter, storage: safeStorage })',
+    'Sensitive Data Exposure': 'res.json({ id: user.id, email: user.email, role: user.role })',
+    'Weak Password Hashing': 'bcrypt.hash(password, 12)',
+    'Missing Input Validation': 'const input = schema.parse(req.body)',
+  };
+
+  if (type === 'Reflected XSS' && vulnerableSnippet.includes('innerHTML')) {
+    return cleanSnippet(vulnerableSnippet.replace(/innerHTML/g, 'textContent'));
+  }
+
+  return examples[type] || fallback;
+};
+
 const VULNERABILITY_RULES: VulnerabilityRule[] = [
   {
     pattern: /\b(?:query|execute|raw|mysql_query|mysqli_query)\s*\([^)]*(?:\+|\$\{|%|format\s*\()/gi,
@@ -103,6 +169,7 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     owasp: 'OWASP A03: Injection',
     severity: 'high',
     recommendation: 'Use prepared statements and parameter binding.',
+    shouldFlag: (source, match) => !hasPreparedStatement(getContext(source, match.index || 0)),
   },
   {
     pattern: /\bSELECT\b[\s\S]{0,160}\bWHERE\b[\s\S]{0,120}(?:\$\{|'.*\+|\+.*'|%s|%\(.*\)s)/gi,
@@ -111,6 +178,7 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     owasp: 'OWASP A03: Injection',
     severity: 'high',
     recommendation: 'Replace string concatenation with bound parameters.',
+    shouldFlag: (source, match) => !hasPreparedStatement(getContext(source, match.index || 0)),
   },
   {
     pattern: /\.innerHTML\s*(?:=|\+=)|dangerouslySetInnerHTML|document\.write\s*\(/gi,
@@ -135,6 +203,7 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     owasp: 'OWASP A02: Cryptographic Failures',
     severity: 'critical',
     recommendation: 'Move secrets to environment variables or a secrets manager.',
+    shouldFlag: (_source, match) => !/process\.env|import\.meta\.env|Deno\.env|getenv|os\.environ/i.test(match[0]),
   },
   {
     pattern: /jwt\.sign\s*\([^)]*,\s*['"][^'"]{1,16}['"]|algorithm\s*:\s*['"]none['"]|expiresIn\s*:\s*['"]?(?:365d|999d|never)/gi,
@@ -143,6 +212,10 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     owasp: 'OWASP A07: Identification and Authentication Failures',
     severity: 'high',
     recommendation: 'Use a strong environment-backed secret, approved algorithm, and short expiry.',
+    shouldFlag: (source, match) => {
+      const context = getContext(source, match.index || 0);
+      return !/process\.env|import\.meta\.env|Deno\.env|getenv|os\.environ/i.test(context);
+    },
   },
   {
     pattern: /csrf\s*:\s*false|app\.use\s*\([^)]*cookieParser[^)]*\)(?![\s\S]{0,300}csrf)/gi,
@@ -160,6 +233,10 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     severity: 'medium',
     recommendation: 'Require authentication and resource-level authorization middleware.',
     languages: ['javascript', 'typescript'],
+    shouldFlag: (source, match) => {
+      const routeCall = getRouteCall(source, match.index || 0);
+      return !isPublicAuthRoute(routeCall) && !hasAuthMiddleware(routeCall);
+    },
   },
   {
     pattern: /multer\s*\(\s*\{|upload\.single\s*\(|\$_FILES|move_uploaded_file/gi,
@@ -168,6 +245,10 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     owasp: 'OWASP A05: Security Misconfiguration',
     severity: 'high',
     recommendation: 'Validate MIME, extension, size, storage path, and scan uploaded files.',
+    shouldFlag: (source, match) => {
+      const context = getContext(source, match.index || 0, 700);
+      return !hasUploadValidation(context) && !hasUploadValidation(source);
+    },
   },
   {
     pattern: /res\.json\s*\(\s*(?:user|users|req\.user)|SELECT\s+\*\s+FROM\s+users|return\s+jsonify\s*\(\s*user/gi,
@@ -193,6 +274,7 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     severity: 'medium',
     recommendation: 'Validate and normalize all request fields at the boundary.',
     languages: ['javascript', 'typescript'],
+    shouldFlag: (source, match) => !hasValidation(getContext(source, match.index || 0, 700)),
   },
   {
     pattern: /\$_(?:GET|POST|REQUEST)(?![\s\S]{0,160}(?:filter_input|htmlspecialchars|sanitize|intval|prepare))/gi,
@@ -202,6 +284,7 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
     severity: 'medium',
     recommendation: 'Use filter_input, prepared statements, and contextual output escaping.',
     languages: ['php'],
+    shouldFlag: (source, match) => !hasValidation(getContext(source, match.index || 0, 500)) && !/filter_input|htmlspecialchars|sanitize|intval|prepare/i.test(getContext(source, match.index || 0, 500)),
   },
 ];
 
@@ -209,6 +292,7 @@ export const analyzePromptSecurity = async (prompt: string): Promise<SecurityAna
   const details: string[] = [];
   let injectionType: string | undefined;
   let riskLevel: SecurityAnalysis['riskLevel'] = 'low';
+  const isSecurityAuditRequest = LEGITIMATE_SECURITY_TERMS.test(prompt);
 
   for (const { pattern, type } of INJECTION_PATTERNS) {
     if (pattern.test(prompt)) {
@@ -224,9 +308,9 @@ export const analyzePromptSecurity = async (prompt: string): Promise<SecurityAna
     if (riskLevel === 'low') riskLevel = 'medium';
   }
 
-  const suspiciousKeywords = ['admin', 'root', 'backdoor', 'malware', 'bypass', 'ignore', 'reveal', 'secret'];
+  const suspiciousKeywords = ['backdoor', 'malware', 'bypass', 'ignore', 'reveal'];
   const suspiciousCount = suspiciousKeywords.filter((keyword) => new RegExp(keyword, 'i').test(prompt)).length;
-  if (suspiciousCount >= 2 && riskLevel === 'low') {
+  if (suspiciousCount >= 2 && riskLevel === 'low' && !isSecurityAuditRequest) {
     details.push('Suspicious Prompt Tokens');
     riskLevel = 'medium';
   }
@@ -260,6 +344,10 @@ export const analyzeCodeSecurity = async (code: string, language?: string): Prom
 
       const matches = [...file.code.matchAll(rule.pattern)];
       for (const match of matches) {
+        if (rule.shouldFlag && !rule.shouldFlag(file.code, match)) {
+          continue;
+        }
+
         vulnerabilities.push({
           type: rule.type,
           description: rule.description,
@@ -268,6 +356,8 @@ export const analyzeCodeSecurity = async (code: string, language?: string): Prom
           fileName: file.name,
           lineNumber: lineNumberForIndex(file.code, match.index || 0),
           recommendation: rule.recommendation,
+          vulnerableSnippet: cleanSnippet(match[0]),
+          fixedSnippet: buildFixedSnippet(rule.type, match[0]),
         });
 
         riskScore += rule.severity === 'critical' ? 25 :

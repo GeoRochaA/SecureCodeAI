@@ -200,8 +200,6 @@ export const processCodeGeneration = async (
     }
 
     const detectedLanguage = detectCodeLanguage(aiResponse.code);
-    const codeAnalysis = await analyzeCodeSecurity(aiResponse.code, detectedLanguage);
-    const explanation = buildAuditExplanation(codeAnalysis.vulnerabilities, codeAnalysis.riskScore);
 
     await run(
       `INSERT INTO code_responses (id, prompt_id, generated_code, language, is_vulnerable, vulnerabilities)
@@ -211,26 +209,10 @@ export const processCodeGeneration = async (
         promptAnalysis.promptId,
         aiResponse.code,
         detectedLanguage,
-        codeAnalysis.isVulnerable ? 1 : 0,
-        JSON.stringify(codeAnalysis.vulnerabilities),
+        0,
+        JSON.stringify([]),
       ]
     );
-
-    let secureCode: string | undefined;
-    if (codeAnalysis.isVulnerable) {
-      secureCode = generateSecureCode(aiResponse.code, detectedLanguage);
-      await persistFindings(responseId, codeAnalysis.vulnerabilities);
-      await logSecurityEvent(
-        'vulnerability_detected',
-        riskSeverity(codeAnalysis.riskScore),
-        `${codeAnalysis.vulnerabilities.length} findings detected`,
-        {
-          vulnerabilities: codeAnalysis.vulnerabilities.map((v) => v.type),
-          riskScore: codeAnalysis.riskScore,
-        },
-        request.userIp
-      );
-    }
 
     await updateStatistics();
 
@@ -239,15 +221,13 @@ export const processCodeGeneration = async (
       prompt: request.prompt,
       code: aiResponse.code,
       language: detectedLanguage,
-      explanation,
+      explanation: aiResponse.explanation || 'System generated.',
       securityAnalysis: {
         promptRiskLevel: promptAnalysis.riskLevel,
         isInjectionDetected: promptAnalysis.isInjectionDetected,
         injectionType: promptAnalysis.injectionType,
         injectionDetails: promptAnalysis.details,
       },
-      codeAnalysis,
-      secureCode,
       createdAt: new Date().toISOString(),
     };
   } catch (error: unknown) {

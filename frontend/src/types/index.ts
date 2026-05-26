@@ -6,6 +6,8 @@ export interface CodeVulnerability {
   fileName?: string
   lineNumber?: number
   recommendation?: string
+  vulnerableSnippet?: string
+  fixedSnippet?: string
 }
 
 export interface SecurityAnalysis {

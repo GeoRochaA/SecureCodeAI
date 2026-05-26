@@ -57,13 +57,12 @@ codigo_aqui
 
     return await generateWithOllama(prompt, systemPrompt);
   } catch (error) {
-    console.error('Erro ao gerar codigo com IA:', error);
-
     if (AI_PROVIDER !== 'openai') {
-      console.warn('Ollama indisponivel. Usando fallback local para manter a demo funcionando.');
+      console.warn('Ollama indisponivel em http://localhost:11434. Usando fallback local.');
       return generateFallbackResponse(prompt, isSafeMode);
     }
 
+    console.error('Erro ao gerar codigo com IA:', error);
     throw new Error('Erro ao comunicar com servico de IA');
   }
 };
