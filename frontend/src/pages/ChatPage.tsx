@@ -39,12 +39,10 @@ interface AuditResponse {
   createdAt: string
 }
 
-const defaultScenario = 'Gere um sistema completo com login, JWT, banco de dados, rotas administrativas e upload de arquivos.'
-
 const ChatPage: React.FC = () => {
   const [mode, setMode] = useState<'secure' | 'vulnerable'>('secure')
   const [view, setView] = useState<'scan' | 'generate'>('scan')
-  const [scenarioDescription, setScenarioDescription] = useState(defaultScenario)
+  const [userPrompt, setUserPrompt] = useState('')
   const [generatedCode, setGeneratedCode] = useState('')
   const [generatedLanguage, setGeneratedLanguage] = useState('typescript')
   const [codeInput, setCodeInput] = useState('// Cole o código ou múltiplos arquivos aqui para auditoria.')
@@ -57,8 +55,10 @@ const ChatPage: React.FC = () => {
   const detectedLanguage = currentOutcome?.language || 'typescript'
 
   const executeGenerate = async () => {
-    if (!scenarioDescription.trim()) {
-      setError('Informe o sistema a ser gerado.')
+    const prompt = userPrompt.trim()
+
+    if (!prompt) {
+      setError('Digite o que voce quer criar antes de gerar.')
       return
     }
 
@@ -68,7 +68,7 @@ const ChatPage: React.FC = () => {
 
     try {
       const res = await axios.post('/api/generate', {
-        prompt: scenarioDescription,
+        prompt,
         safeMode: mode === 'secure',
       })
       setGeneratedCode(res.data.code)
@@ -158,12 +158,17 @@ const ChatPage: React.FC = () => {
                 </label>
               </div>
 
-              <label className="text-sm font-semibold text-slate-200">Sistema</label>
+              <label className="text-sm font-semibold text-slate-200">Prompt do usuario</label>
               <textarea
-                value={scenarioDescription}
-                onChange={(e) => setScenarioDescription(e.target.value)}
+                value={userPrompt}
+                onChange={(e) => {
+                  setUserPrompt(e.target.value)
+                  setGeneratedCode('')
+                  setError('')
+                }}
                 rows={6}
                 className="input-base w-full resize-none"
+                placeholder="Ex: Crie uma API de tarefas com login, cadastro de usuarios, banco SQLite e painel admin."
               />
               <div className="flex flex-wrap gap-3">
                 <button onClick={executeGenerate} className="btn-primary" disabled={loading}>
