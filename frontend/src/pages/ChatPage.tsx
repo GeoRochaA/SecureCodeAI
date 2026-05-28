@@ -86,10 +86,13 @@ const ChatPage: React.FC = () => {
     setAnalysis(null)
     setError('')
     setView('scan')
+    void executeAnalyze(generatedCode)
   }
 
-  const executeAnalyze = async () => {
-    if (!codeInput.trim()) {
+  const executeAnalyze = async (codeOverride?: string) => {
+    const codeToAnalyze = codeOverride ?? codeInput
+
+    if (!codeToAnalyze.trim()) {
       setError('Cole código para auditar.')
       return
     }
@@ -100,7 +103,7 @@ const ChatPage: React.FC = () => {
 
     try {
       const res = await axios.post('/api/analyze', {
-        code: codeInput,
+        code: codeToAnalyze,
       })
       setAnalysis(res.data)
     } catch (err: any) {
@@ -129,6 +132,10 @@ const ChatPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {error && (
+          <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
+        )}
 
         <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6">
           {view === 'generate' ? (
@@ -176,7 +183,7 @@ const ChatPage: React.FC = () => {
                 </button>
                 {generatedCode && (
                   <button type="button" onClick={sendGeneratedCodeToScanner} className="btn-secondary">
-                    Enviar para Scanner
+                    Auditar geracao
                   </button>
                 )}
               </div>
@@ -202,7 +209,7 @@ const ChatPage: React.FC = () => {
                 language={detectedLanguage}
                 placeholder="Cole aqui o código ou um conjunto de arquivos"
               />
-              <button onClick={executeAnalyze} className="btn-primary" disabled={loading}>
+              <button onClick={() => executeAnalyze()} className="btn-primary" disabled={loading}>
                 {loading ? 'Auditando...' : 'Iniciar auditoria'}
               </button>
             </div>
@@ -217,10 +224,6 @@ const ChatPage: React.FC = () => {
             <h2 className="text-xl font-semibold text-cyber-blue">Auditoria</h2>
           </div>
         </div>
-
-        {error && (
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
-        )}
 
         {!currentOutcome && !error && (
           <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6 text-slate-400">

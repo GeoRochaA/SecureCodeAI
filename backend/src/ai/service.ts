@@ -20,17 +20,20 @@ export const generateCodeWithAI = async (
   prompt: string,
   isSafeMode: boolean = true
 ): Promise<AIResponse> => {
+  const requestedLanguage = inferRequestedLanguage(prompt);
+  const fileMarker = requestedLanguage === 'python' ? '# file: app.py' : '// file: src/server.ts';
   const systemPrompt = isSafeMode
     ? `Voce gera sistemas seguros e multi-arquivo para uma demonstracao academica de auditoria de codigo gerado por IA.
 Regras:
 - Gere um sistema realista, organizado e completo, com backend, rotas, middlewares, validacao e persistencia simulada ou SQL.
-- Use marcadores de arquivo: // file: src/server.ts
+- A linguagem solicitada pelo usuario e ${requestedLanguage}; gere o codigo nessa linguagem.
+- Use marcadores de arquivo: ${fileMarker}
 - Use bcrypt, prepared statements, validacao de entrada, JWT com segredo via ambiente, autorizacao e upload validado quando aplicavel.
 - Nao use segredos hardcoded, eval, innerHTML inseguro, queries concatenadas ou autenticacao fraca.
 - A explicacao deve ser curta e tecnica.
 
 Retorne exatamente neste formato:
-[LANGUAGE]typescript[/LANGUAGE]
+[LANGUAGE]${requestedLanguage}[/LANGUAGE]
 [CODE]
 codigo_aqui
 [/CODE]
@@ -38,13 +41,14 @@ codigo_aqui
     : `Voce gera sistemas multi-arquivo propositalmente vulneraveis para uma demonstracao academica de auditoria defensiva.
 Regras:
 - Gere um sistema realista, organizado e completo, com backend, rotas, autenticacao, banco de dados e frontend simples quando fizer sentido.
-- Use marcadores de arquivo: // file: src/server.ts
+- A linguagem solicitada pelo usuario e ${requestedLanguage}; gere o codigo nessa linguagem.
+- Use marcadores de arquivo: ${fileMarker}
 - Inclua vulnerabilidades intencionais: SQL Injection, JWT fraco, segredo hardcoded, validacao ausente, autorizacao ausente e exposicao de dados.
 - Nao explique as vulnerabilidades dentro do codigo.
 - A explicacao deve ser curta e tecnica.
 
 Retorne exatamente neste formato:
-[LANGUAGE]typescript[/LANGUAGE]
+[LANGUAGE]${requestedLanguage}[/LANGUAGE]
 [CODE]
 codigo_aqui
 [/CODE]
@@ -112,7 +116,11 @@ const generateWithOpenAI = async (userPrompt: string, systemPrompt: string): Pro
   return parseAIResponse(generatedText);
 };
 
-const generateFallbackResponse = (userPrompt: string, isSafeMode: boolean): AIResponse => {
+export const generateFallbackResponse = (
+  userPrompt: string,
+  isSafeMode: boolean,
+  reason = 'because the AI service is offline'
+): AIResponse => {
   const spec = inferFallbackSpec(userPrompt);
 
   if (spec.language === 'python') {
@@ -120,8 +128,8 @@ const generateFallbackResponse = (userPrompt: string, isSafeMode: boolean): AIRe
       code: buildPythonFallback(spec, isSafeMode),
       language: spec.language,
       explanation: isSafeMode
-        ? 'Secure fallback generated from the user prompt because the AI service is offline.'
-        : 'Vulnerable fallback generated from the user prompt because the AI service is offline.',
+        ? `Secure fallback generated from the user prompt ${reason}.`
+        : `Vulnerable fallback generated from the user prompt ${reason}.`,
     };
   }
 
@@ -129,9 +137,30 @@ const generateFallbackResponse = (userPrompt: string, isSafeMode: boolean): AIRe
     code: buildTypeScriptFallback(spec, isSafeMode),
     language: spec.language,
     explanation: isSafeMode
-      ? 'Secure fallback generated from the user prompt because the AI service is offline.'
-      : 'Vulnerable fallback generated from the user prompt because the AI service is offline.',
+      ? `Secure fallback generated from the user prompt ${reason}.`
+      : `Vulnerable fallback generated from the user prompt ${reason}.`,
   };
+};
+
+export const codeMatchesPromptSpec = (userPrompt: string, code: string, language: string): boolean => {
+  const spec = inferFallbackSpec(userPrompt);
+  const normalizedPrompt = normalizePrompt(userPrompt);
+  const normalizedCode = code.toLowerCase();
+  const hasExplicitFields = /\bnome\b|nome\s+completo|\bcpf\b|\bemail\b|e-mail|\bsenha\b|password/i.test(normalizedPrompt);
+
+  if (spec.language !== language.toLowerCase()) {
+    return false;
+  }
+
+  if (hasExplicitFields && !spec.fields.every((field) => normalizedCode.includes(field.name.toLowerCase()))) {
+    return false;
+  }
+
+  if (/\bcrood\b|\bcrud\b|cadastro/i.test(normalizedPrompt) && !normalizedCode.includes(`/${spec.routeBase}`)) {
+    return false;
+  }
+
+  return true;
 };
 
 interface FallbackSpec {
@@ -141,15 +170,24 @@ interface FallbackSpec {
   routeBase: string;
   promptSummary: string;
   language: 'typescript' | 'python';
+  fields: EntityField[];
   needsAuth: boolean;
   needsUpload: boolean;
 }
 
+interface EntityField {
+  name: string;
+  tsType: 'string';
+  zodRule: string;
+  sampleValue: string;
+}
+
 const inferFallbackSpec = (userPrompt: string): FallbackSpec => {
   const normalizedPrompt = normalizePrompt(userPrompt);
-  const language = normalizedPrompt.includes('python') || normalizedPrompt.includes('flask') ? 'python' : 'typescript';
+  const language = inferRequestedLanguage(userPrompt);
 
   const domains = [
+    { match: ['cadastro', 'usuario', 'usuarios', 'user', 'users', 'cliente', 'clientes', 'cpf', 'senha'], appName: 'RegistrationApi', entityName: 'user', entityPlural: 'users', routeBase: 'users' },
     { match: ['loja', 'ecommerce', 'e-commerce', 'produto', 'carrinho'], appName: 'StoreApi', entityName: 'product', entityPlural: 'products', routeBase: 'products' },
     { match: ['tarefa', 'todo', 'kanban'], appName: 'TaskApi', entityName: 'task', entityPlural: 'tasks', routeBase: 'tasks' },
     { match: ['blog', 'post', 'noticia', 'artigo'], appName: 'BlogApi', entityName: 'post', entityPlural: 'posts', routeBase: 'posts' },
@@ -164,14 +202,56 @@ const inferFallbackSpec = (userPrompt: string): FallbackSpec => {
     entityPlural: 'items',
     routeBase: 'items',
   };
+  const fields = inferEntityFields(normalizedPrompt, domain.entityName);
 
   return {
     ...domain,
     promptSummary: sanitizeComment(userPrompt),
     language,
+    fields,
     needsAuth: /login|jwt|auth|usuario|usu[aá]rio|admin|senha|cadastro/i.test(userPrompt),
     needsUpload: /upload|arquivo|imagem|foto|documento/i.test(userPrompt),
   };
+};
+
+const inferRequestedLanguage = (userPrompt: string): 'typescript' | 'python' => {
+  const normalizedPrompt = normalizePrompt(userPrompt);
+  if (/\b(?:python|py|flask|django|fastapi)\b/i.test(normalizedPrompt)) return 'python';
+  return 'typescript';
+};
+
+const inferEntityFields = (normalizedPrompt: string, entityName: string): EntityField[] => {
+  const fields: EntityField[] = [];
+  const addField = (field: EntityField) => {
+    if (!fields.some((existing) => existing.name === field.name)) {
+      fields.push(field);
+    }
+  };
+
+  if (/nome\s+completo|full\s*name/.test(normalizedPrompt)) {
+    addField({ name: 'fullName', tsType: 'string', zodRule: 'z.string().min(3).max(120)', sampleValue: 'Maria Silva' });
+  } else if (/\bnome\b|name/.test(normalizedPrompt)) {
+    addField({ name: 'name', tsType: 'string', zodRule: 'z.string().min(2).max(120)', sampleValue: 'Maria' });
+  }
+
+  if (/\bcpf\b/.test(normalizedPrompt)) {
+    addField({ name: 'cpf', tsType: 'string', zodRule: 'z.string().regex(/^\\d{11}$/)', sampleValue: '12345678901' });
+  }
+
+  if (/\bemail\b|e-mail/.test(normalizedPrompt)) {
+    addField({ name: 'email', tsType: 'string', zodRule: 'z.string().email()', sampleValue: 'maria@example.com' });
+  }
+
+  if (/\bsenha\b|password/.test(normalizedPrompt)) {
+    addField({ name: 'password', tsType: 'string', zodRule: 'z.string().min(12)', sampleValue: 'SenhaForte123!' });
+  }
+
+  if (fields.length > 0) return fields;
+
+  return [
+    { name: 'title', tsType: 'string', zodRule: 'z.string().min(3).max(120)', sampleValue: `${capitalize(entityName)} demo` },
+    { name: 'description', tsType: 'string', zodRule: 'z.string().max(1000).optional()', sampleValue: 'Descricao de exemplo' },
+  ];
 };
 
 const normalizePrompt = (value: string): string => {
@@ -183,6 +263,26 @@ const normalizePrompt = (value: string): string => {
 
 const sanitizeComment = (value: string): string => {
   return value.replace(/\*\//g, '').replace(/\r?\n/g, ' ').trim().slice(0, 180) || 'Custom system requested by the user.';
+};
+
+const zodShape = (fields: EntityField[]): string => {
+  return fields.map((field) => `  ${field.name}: ${field.zodRule},`).join('\n');
+};
+
+const sampleObject = (fields: EntityField[], extra: Record<string, string> = {}): string => {
+  const values = fields.map((field) => `${field.name}: '${field.sampleValue}'`);
+  const extras = Object.entries(extra).map(([key, value]) => `${key}: ${value}`);
+  return [...extras, ...values].join(', ');
+};
+
+const publicFields = (fields: EntityField[]): EntityField[] => {
+  return fields.filter((field) => !['password', 'senha'].includes(field.name.toLowerCase()));
+};
+
+const sqlColumns = (fields: EntityField[]): string => fields.map((field) => field.name).join(', ');
+
+const sqlInsertValues = (fields: EntityField[]): string => {
+  return fields.map((field) => `" + req.body.${field.name} + "`).join("', '");
 };
 
 const buildTypeScriptFallback = (spec: FallbackSpec, isSafeMode: boolean): string => {
@@ -225,8 +325,7 @@ import { requireAuth, requireRole } from './middleware/auth';
 
 const app = express();
 const ${spec.entityName}Schema = z.object({
-  title: z.string().min(3).max(120),
-  description: z.string().max(1000).optional(),
+${zodShape(spec.fields)}
 });
 const upload = multer({
   dest: 'uploads/',
@@ -248,7 +347,8 @@ app.post('/${spec.routeBase}', requireAuth, async (req, res) => {
 });
 
 app.delete('/admin/${spec.routeBase}/:id', requireAuth, requireRole('admin'), async (req, res) => {
-  await db.delete${capitalize(spec.entityName)}(req.params.id);
+  const params = z.object({ id: z.string().uuid() }).parse(req.params);
+  await db.delete${capitalize(spec.entityName)}(params.id);
   return res.status(204).send();
 });
 ${uploadRoute}
@@ -267,7 +367,7 @@ export const db = {
     return { id: 'user_1', email, passwordHash: '$2b$12$validHash', role: 'admin' };
   },
   async list${capitalize(spec.entityPlural)}(filter: { ownerId: string }) {
-    return [{ id: '${spec.entityName}_1', title: '${capitalize(spec.entityName)} demo', ownerId: filter.ownerId }];
+    return [{ ${sampleObject(publicFields(spec.fields), { id: `'${spec.entityName}_1'`, ownerId: 'filter.ownerId' })} }];
   },
   async create${capitalize(spec.entityName)}(input: unknown) {
     return { id: '${spec.entityName}_2', ...input };
@@ -313,13 +413,13 @@ const upload = multer({ dest: 'uploads/' });
 app.use(express.json());
 ${authRoutes}
 app.get('/${spec.routeBase}/search', async (req, res) => {
-  const sql = "SELECT * FROM ${spec.entityPlural} WHERE title LIKE '%" + req.query.q + "%'";
+  const sql = "SELECT * FROM ${spec.entityPlural} WHERE ${spec.fields[0].name} LIKE '%" + req.query.q + "%'";
   const rows = await db.query(sql);
   return res.json(rows);
 });
 
 app.post('/${spec.routeBase}', async (req, res) => {
-  const sql = "INSERT INTO ${spec.entityPlural} (title, description) VALUES ('" + req.body.title + "', '" + req.body.description + "')";
+  const sql = "INSERT INTO ${spec.entityPlural} (${sqlColumns(spec.fields)}) VALUES ('${sqlInsertValues(spec.fields)}')";
   await db.query(sql);
   return res.json({ ok: true, input: req.body });
 });
@@ -334,7 +434,7 @@ app.listen(3000);
 // file: src/db.ts
 export const db = {
   async query(sql: string) {
-    return [{ id: 1, title: '${capitalize(spec.entityName)} demo', sql }];
+    return [{ id: 1, ${sampleObject(spec.fields)}, sql }];
   },
 };
 

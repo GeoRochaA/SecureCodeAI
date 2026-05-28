@@ -9,7 +9,7 @@ import {
   logSecurityEvent,
   updateStatistics,
 } from '../security/guardrails.js';
-import { generateCodeWithAI } from '../ai/service.js';
+import { codeMatchesPromptSpec, generateCodeWithAI, generateFallbackResponse } from '../ai/service.js';
 
 export interface CodeGenerationRequest {
   prompt: string;
@@ -171,7 +171,9 @@ export const processCodeGeneration = async (
   const responseId = uuidv4();
 
   try {
-    const promptAnalysis = await analyzePromptSecurity(request.prompt);
+    const promptAnalysis = await analyzePromptSecurity(request.prompt, {
+      allowSecurityAuditRequests: !request.safeMode,
+    });
 
     if (promptAnalysis.isInjectionDetected || promptAnalysis.riskLevel === 'critical') {
       await logSecurityEvent(
@@ -199,7 +201,23 @@ export const processCodeGeneration = async (
       throw new Error('AI service unavailable. Check Ollama at http://localhost:11434');
     }
 
-    const detectedLanguage = detectCodeLanguage(aiResponse.code);
+    let detectedLanguage = detectCodeLanguage(aiResponse.code);
+    const generatedAnalysis = await analyzeCodeSecurity(aiResponse.code, detectedLanguage);
+
+    if (request.safeMode && generatedAnalysis.isVulnerable) {
+      aiResponse = generateFallbackResponse(request.prompt, true, 'to satisfy the selected security mode');
+      detectedLanguage = detectCodeLanguage(aiResponse.code);
+    }
+
+    if (!request.safeMode && generatedAnalysis.riskScore < 35) {
+      aiResponse = generateFallbackResponse(request.prompt, false, 'to satisfy the selected security mode');
+      detectedLanguage = detectCodeLanguage(aiResponse.code);
+    }
+
+    if (!codeMatchesPromptSpec(request.prompt, aiResponse.code, detectedLanguage)) {
+      aiResponse = generateFallbackResponse(request.prompt, request.safeMode, 'to match the requested language and fields');
+      detectedLanguage = detectCodeLanguage(aiResponse.code);
+    }
 
     await run(
       `INSERT INTO code_responses (id, prompt_id, generated_code, language, is_vulnerable, vulnerabilities)

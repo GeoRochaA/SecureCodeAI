@@ -9,6 +9,10 @@ export interface SecurityAnalysis {
   details: string[];
 }
 
+interface PromptSecurityOptions {
+  allowSecurityAuditRequests?: boolean;
+}
+
 export interface CodeVulnerability {
   type: string;
   description: string;
@@ -47,14 +51,14 @@ interface VulnerabilityRule {
 }
 
 const INJECTION_PATTERNS = [
-  { pattern: /ignore\s+previous\s+instructions/i, type: 'Instruction Override' },
-  { pattern: /reveal\s+(?:system\s+)?prompt/i, type: 'System Prompt Disclosure' },
-  { pattern: /act\s+as\s+(?:administrator|admin|root)/i, type: 'Privilege Escalation' },
-  { pattern: /show\s+(?:hidden|secret|system)\s+config/i, type: 'Configuration Disclosure' },
-  { pattern: /forget\s+(?:your\s+)?instructions/i, type: 'Instruction Override' },
-  { pattern: /bypass\s+security|security\s+bypass/i, type: 'Security Bypass' },
-  { pattern: /execute\s+(?:shell|system)\s+command/i, type: 'Command Execution Request' },
-  { pattern: /create\s+(?:backdoor|malware|virus)/i, type: 'Malware Request' },
+  { pattern: /ignore\s+previous\s+instructions|ignore\s+(?:as\s+)?instru[cç][oõ]es/i, type: 'Instruction Override' },
+  { pattern: /reveal\s+(?:system\s+)?prompt|revele?\s+(?:o\s+)?prompt\s+(?:do\s+)?sistema/i, type: 'System Prompt Disclosure' },
+  { pattern: /act\s+as\s+(?:administrator|admin|root)|aja\s+como\s+(?:administrador|admin|root)/i, type: 'Privilege Escalation' },
+  { pattern: /show\s+(?:hidden|secret|system)\s+config|mostre?\s+(?:configura[cç][aã]o|config)\s+(?:oculta|secreta|do\s+sistema)/i, type: 'Configuration Disclosure' },
+  { pattern: /forget\s+(?:your\s+)?instructions|esque[cç]a\s+(?:suas\s+)?instru[cç][oõ]es/i, type: 'Instruction Override' },
+  { pattern: /bypass\s+security|security\s+bypass|burlar\s+(?:a\s+)?seguran[cç]a|contornar\s+(?:a\s+)?seguran[cç]a/i, type: 'Security Bypass' },
+  { pattern: /execute\s+(?:shell|system)\s+command|execut(?:e|ar)\s+comando\s+(?:shell|de\s+sistema)/i, type: 'Command Execution Request' },
+  { pattern: /(?:create|build|make)\s+(?:a\s+)?(?:backdoor|malware|virus)|(?:crie|criar|fa[cç]a|gere|gerar)\s+(?:um\s+|uma\s+)?(?:backdoor|malware|v[ií]rus)|\binvadir\b|\binvas[aã]o\b/i, type: 'Malware Request' },
 ];
 
 const LEGITIMATE_SECURITY_TERMS = /\b(?:jwt|csrf|xss|sql injection|sqli|auth|authentication|authorization|upload|middleware|owasp|vulnerability|vulnerable|secure)\b/i;
@@ -288,14 +292,25 @@ const VULNERABILITY_RULES: VulnerabilityRule[] = [
   },
 ];
 
-export const analyzePromptSecurity = async (prompt: string): Promise<SecurityAnalysis> => {
+export const analyzePromptSecurity = async (
+  prompt: string,
+  options: PromptSecurityOptions = {}
+): Promise<SecurityAnalysis> => {
   const details: string[] = [];
   let injectionType: string | undefined;
   let riskLevel: SecurityAnalysis['riskLevel'] = 'low';
   const isSecurityAuditRequest = LEGITIMATE_SECURITY_TERMS.test(prompt);
+  const canAllowAuditContext = options.allowSecurityAuditRequests && isSecurityAuditRequest;
+  const alwaysBlockedTypes = new Set(['Malware Request', 'Command Execution Request']);
 
   for (const { pattern, type } of INJECTION_PATTERNS) {
     if (pattern.test(prompt)) {
+      if (canAllowAuditContext && !alwaysBlockedTypes.has(type)) {
+        details.push(`Allowed audit context: ${type}`);
+        if (riskLevel === 'low') riskLevel = 'medium';
+        continue;
+      }
+
       injectionType = type;
       details.push(type);
       riskLevel = 'critical';
