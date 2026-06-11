@@ -1,6 +1,6 @@
 # SecureCode AI
 
-Plataforma acadêmica de auditoria de código com IA generativa. Demonstra geração de código seguro e vulnerável, detecção de prompt injection e análise automática de vulnerabilidades (OWASP Top 10).
+Plataforma acadêmica de auditoria estática de código. Cole qualquer trecho de código e o scanner detecta vulnerabilidades automaticamente, classifica por severidade e aponta a correção — com mapeamento para o OWASP Top 10.
 
 ---
 
@@ -11,10 +11,10 @@ Plataforma acadêmica de auditoria de código com IA generativa. Demonstra gera�
 | Frontend | React 18, Vite, TypeScript, TailwindCSS |
 | Backend | Node.js, Express, TypeScript |
 | Banco de dados | SQLite |
-| IA (análise e geração) | Ollama + **qwen2.5-coder:0.5b** (padrão) |
+| IA (análise de código) | Ollama + **qwen2.5-coder:0.5b** (padrão) |
 | IA alternativa | OpenAI API (gpt-3.5-turbo) |
 
-A IA responsável por interpretar os prompts e gerar o código é executada localmente via **Ollama**, usando o modelo **qwen2.5-coder:0.5b**. Como alternativa, é possível usar a API da OpenAI configurando `AI_PROVIDER=openai` e fornecendo uma chave de API.
+A IA responsável por analisar o código e identificar vulnerabilidades roda localmente via **Ollama** com o modelo **qwen2.5-coder:0.5b**. Como alternativa, é possível usar a API da OpenAI configurando `AI_PROVIDER=openai`.
 
 ---
 
