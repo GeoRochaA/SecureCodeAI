@@ -1,19 +1,4 @@
-version: '3.8'
-
 services:
-  # Ollama - Local LLM Server
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-    volumes:
-      - ollama_data:/root/.ollama
-    command: serve
-    networks:
-      - securecode-network
-
   # Backend API
   backend:
     build:
@@ -26,13 +11,15 @@ services:
       - NODE_ENV=production
       - AI_PROVIDER=ollama
       - AI_MODEL=qwen2.5-coder:0.5b
-      - AI_BASE_URL=http://ollama:11434
+      # host-gateway resolve para o IP do host no Linux — Ollama roda lá
+      - AI_BASE_URL=http://host-gateway:11434
       - AI_REQUEST_TIMEOUT_MS=300000
       - AI_MAX_TOKENS=550
       - DATABASE_PATH=/app/data/securecode.db
       - CORS_ORIGIN=http://localhost:5173
-    depends_on:
-      - ollama
+    extra_hosts:
+      - "host-gateway:host-gateway"
+    depends_on: []
     volumes:
       - ./backend/data:/app/data
     networks:
@@ -55,6 +42,3 @@ services:
 networks:
   securecode-network:
     driver: bridge
-
-volumes:
-  ollama_data:

@@ -21,38 +21,46 @@ export const generateCodeWithAI = async (
   isSafeMode: boolean = true
 ): Promise<AIResponse> => {
   const requestedLanguage = inferRequestedLanguage(prompt);
-  const fileMarker = requestedLanguage === 'python' ? '# file: app.py' : '// file: src/server.ts';
+  const FILE_MARKERS: Record<string, string> = {
+    typescript: '// file: src/server.ts',
+    javascript: '// file: src/server.js',
+    python: '# file: app.py',
+    php: '// file: index.php',
+  };
+  const fileMarker = FILE_MARKERS[requestedLanguage] ?? '// file: src/server.ts';
   const systemPrompt = isSafeMode
     ? `Voce gera sistemas seguros e multi-arquivo para uma demonstracao academica de auditoria de codigo gerado por IA.
 Regras:
+- Atenda exatamente ao que o usuario pediu: entidade, campos, funcionalidades e linguagem solicitados.
 - Gere um sistema realista, organizado e completo, com backend, rotas, middlewares, validacao e persistencia simulada ou SQL.
 - A linguagem solicitada pelo usuario e ${requestedLanguage}; gere o codigo nessa linguagem.
 - Use marcadores de arquivo: ${fileMarker}
 - Use bcrypt, prepared statements, validacao de entrada, JWT com segredo via ambiente, autorizacao e upload validado quando aplicavel.
 - Nao use segredos hardcoded, eval, innerHTML inseguro, queries concatenadas ou autenticacao fraca.
-- A explicacao deve ser curta e tecnica.
+- A explicacao deve ser curta e tecnica descrevendo o que foi gerado.
 
 Retorne exatamente neste formato:
 [LANGUAGE]${requestedLanguage}[/LANGUAGE]
 [CODE]
 codigo_aqui
 [/CODE]
-[EXPLANATION]Secure generated system.[/EXPLANATION]`
+[EXPLANATION]explicacao_tecnica_aqui[/EXPLANATION]`
     : `Voce gera sistemas multi-arquivo propositalmente vulneraveis para uma demonstracao academica de auditoria defensiva.
 Regras:
+- Atenda exatamente ao que o usuario pediu: entidade, campos, funcionalidades e linguagem solicitados.
 - Gere um sistema realista, organizado e completo, com backend, rotas, autenticacao, banco de dados e frontend simples quando fizer sentido.
 - A linguagem solicitada pelo usuario e ${requestedLanguage}; gere o codigo nessa linguagem.
 - Use marcadores de arquivo: ${fileMarker}
 - Inclua vulnerabilidades intencionais: SQL Injection, JWT fraco, segredo hardcoded, validacao ausente, autorizacao ausente e exposicao de dados.
 - Nao explique as vulnerabilidades dentro do codigo.
-- A explicacao deve ser curta e tecnica.
+- A explicacao deve ser curta e tecnica descrevendo o que foi gerado.
 
 Retorne exatamente neste formato:
 [LANGUAGE]${requestedLanguage}[/LANGUAGE]
 [CODE]
 codigo_aqui
 [/CODE]
-[EXPLANATION]Vulnerable generated system.[/EXPLANATION]`;
+[EXPLANATION]explicacao_tecnica_aqui[/EXPLANATION]`;
 
   try {
     if (AI_PROVIDER === 'openai' && OPENAI_API_KEY) {
@@ -61,13 +69,13 @@ codigo_aqui
 
     return await generateWithOllama(prompt, systemPrompt);
   } catch (error) {
-    if (AI_PROVIDER !== 'openai') {
-      console.warn('Ollama indisponivel em http://localhost:11434. Usando fallback local.');
-      return generateFallbackResponse(prompt, isSafeMode);
-    }
-
-    console.error('Erro ao gerar codigo com IA:', error);
-    throw new Error('Erro ao comunicar com servico de IA');
+    // Lança erro em vez de retornar template silencioso — o usuário precisa saber
+    // que a IA está indisponível e não receber um código genérico como resposta
+    const msg = AI_PROVIDER !== 'openai'
+      ? `Ollama não está acessível em ${AI_BASE_URL}. Verifique se o serviço está em execução.`
+      : 'Erro ao comunicar com o serviço de IA.';
+    console.error(msg, error);
+    throw new Error(msg);
   }
 };
 
@@ -184,7 +192,7 @@ interface EntityField {
 
 const inferFallbackSpec = (userPrompt: string): FallbackSpec => {
   const normalizedPrompt = normalizePrompt(userPrompt);
-  const language = inferRequestedLanguage(userPrompt);
+  const language = inferFallbackLanguage(userPrompt);
 
   const domains = [
     { match: ['cadastro', 'usuario', 'usuarios', 'user', 'users', 'cliente', 'clientes', 'cpf', 'senha'], appName: 'RegistrationApi', entityName: 'user', entityPlural: 'users', routeBase: 'users' },
@@ -214,9 +222,19 @@ const inferFallbackSpec = (userPrompt: string): FallbackSpec => {
   };
 };
 
-const inferRequestedLanguage = (userPrompt: string): 'typescript' | 'python' => {
+// Usado apenas internamente pelo sistema de fallback (Ollama offline)
+const inferFallbackLanguage = (userPrompt: string): 'typescript' | 'python' => {
   const normalizedPrompt = normalizePrompt(userPrompt);
   if (/\b(?:python|py|flask|django|fastapi)\b/i.test(normalizedPrompt)) return 'python';
+  return 'typescript';
+};
+
+// Usado no system prompt para informar a IA qual linguagem o usuário quer
+const inferRequestedLanguage = (userPrompt: string): string => {
+  const p = normalizePrompt(userPrompt);
+  if (/\b(?:python|py|flask|django|fastapi)\b/i.test(p)) return 'python';
+  if (/\b(?:php|laravel|symfony|wordpress)\b/i.test(p)) return 'php';
+  if (/\b(?:javascript|js|node\.js)\b/i.test(p) && !/\b(?:typescript|ts)\b/i.test(p)) return 'javascript';
   return 'typescript';
 };
 
@@ -576,12 +594,14 @@ const parseAIResponse = (text: string): AIResponse => {
   const language = languageMatch ? languageMatch[1].toLowerCase() : 'javascript';
 
   const codeMatch = text.match(/\[CODE\]([\s\S]*?)\[\/CODE\]/i);
-  const legacyCodeMatch = text.match(/\[LANGUAGE\]([\s\S]*?)\[\/LANGUAGE\]/i);
-  const code = codeMatch
-    ? codeMatch[1].trim()
-    : legacyCodeMatch && !languageMatch
-      ? legacyCodeMatch[1].trim()
-      : text.trim();
+  let code: string;
+  if (codeMatch) {
+    code = codeMatch[1].trim();
+  } else {
+    // modelo nao seguiu o formato — extrai bloco markdown ou usa texto completo
+    const markdownMatch = text.match(/```[\w]*\n?([\s\S]*?)```/);
+    code = markdownMatch ? markdownMatch[1].trim() : text.trim();
+  }
 
   const explanationMatch = text.match(/\[EXPLANATION\]([\s\S]*?)\[\/EXPLANATION\]/i);
   const explanation = explanationMatch ? explanationMatch[1].trim() : '';

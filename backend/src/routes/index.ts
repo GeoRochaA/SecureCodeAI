@@ -1,3 +1,4 @@
+// CORREÇÕES: #4, #5, #6, #7
 import { Express, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
@@ -10,19 +11,34 @@ import {
 import { checkAIServiceHealth } from '../ai/service.js';
 import { analyzePromptSecurity } from '../security/guardrails.js';
 
-const getErrorMessage = (error: unknown): string => {
-  return error instanceof Error ? error.message : String(error);
+const MAX_PROMPT_CHARS = 4_000;
+const MAX_CODE_CHARS = 100_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IS_DEV = process.env.NODE_ENV === 'development';
+
+// Nunca retorna detalhes internos de exceção em produção
+const safeErrorMessage = (error: unknown): string => {
+  if (IS_DEV) return error instanceof Error ? error.message : String(error);
+  return 'Request could not be processed.';
 };
 
 export const setupRoutes = (app: Express) => {
   app.post('/api/generate', asyncHandler(async (req: Request, res: Response) => {
     const { prompt, safeMode } = req.body;
 
-    if (!prompt || prompt.trim().length === 0) {
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    const userIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || '').toString();
+    // #5 — limita comprimento do prompt para evitar DoS e overflow no banco
+    if (prompt.length > MAX_PROMPT_CHARS) {
+      return res.status(400).json({
+        error: `Prompt exceeds maximum length of ${MAX_PROMPT_CHARS} characters`,
+      });
+    }
+
+    // #4 — req.ip usa X-Forwarded-For corretamente via trust proxy (server.ts)
+    const userIp = req.ip || '0.0.0.0';
 
     try {
       const result = await processCodeGeneration({
@@ -33,8 +49,9 @@ export const setupRoutes = (app: Express) => {
 
       return res.json(result);
     } catch (error: unknown) {
+      // #7 — nunca expõe mensagem interna de erro ao cliente em produção
       return res.status(400).json({
-        error: getErrorMessage(error),
+        error: safeErrorMessage(error),
         timestamp: new Date().toISOString(),
       });
     }
@@ -43,11 +60,20 @@ export const setupRoutes = (app: Express) => {
   app.post('/api/analyze', asyncHandler(async (req: Request, res: Response) => {
     const { code, language } = req.body;
 
-    if (!code) {
+    if (!code || typeof code !== 'string') {
       return res.status(400).json({ error: 'Code is required' });
     }
 
-    const userIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || '').toString();
+    // #6 — limita tamanho do código para evitar DoS computacional nos regex de guardrails
+    if (code.length > MAX_CODE_CHARS) {
+      return res.status(400).json({
+        error: `Code exceeds maximum size of ${MAX_CODE_CHARS} characters`,
+      });
+    }
+
+    // #4 — ip via trust proxy
+    const userIp = req.ip || '0.0.0.0';
+
     const result = await analyzeExistingCode({
       code,
       language,
@@ -70,6 +96,12 @@ export const setupRoutes = (app: Express) => {
 
   app.get('/api/prompt/:id', asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
+
+    // Valida formato UUID antes de consultar o banco
+    if (!UUID_RE.test(id)) {
+      return res.status(400).json({ error: 'Invalid prompt ID format' });
+    }
+
     const details = await getPromptDetails(id);
 
     if (!details) {
@@ -91,8 +123,14 @@ export const setupRoutes = (app: Express) => {
   app.post('/api/validate', asyncHandler(async (req: Request, res: Response) => {
     const { prompt } = req.body;
 
-    if (!prompt) {
+    if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    if (prompt.length > MAX_PROMPT_CHARS) {
+      return res.status(400).json({
+        error: `Prompt exceeds maximum length of ${MAX_PROMPT_CHARS} characters`,
+      });
     }
 
     const analysis = await analyzePromptSecurity(prompt);

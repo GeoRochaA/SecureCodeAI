@@ -330,11 +330,17 @@ export const analyzePromptSecurity = async (
     riskLevel = 'medium';
   }
 
+  // #9 — trunca antes de gravar para evitar esgotamento de disco via prompts enormes
+  const MAX_STORED_PROMPT = 4_000;
+  const storedPrompt = prompt.length > MAX_STORED_PROMPT
+    ? prompt.slice(0, MAX_STORED_PROMPT) + '…[truncated]'
+    : prompt;
+
   const promptId = uuidv4();
   await run(
     `INSERT INTO prompts (id, user_input, risk_level, is_injection_detected, injection_type)
      VALUES (?, ?, ?, ?, ?)`,
-    [promptId, prompt, riskLevel, injectionType ? 1 : 0, injectionType ?? null]
+    [promptId, storedPrompt, riskLevel, injectionType ? 1 : 0, injectionType ?? null]
   );
 
   return {

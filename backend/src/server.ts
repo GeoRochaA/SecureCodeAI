@@ -1,6 +1,9 @@
+// CORREÇÕES: #1, #2, #3, #4
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { initializeDatabase } from './database/init.js';
 import { setupRoutes } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -13,14 +16,43 @@ dotenv.config();
 
 const app: Express = express();
 
-// Middleware
+// Informa ao Express que está atrás de um proxy reverso (Docker/Nginx)
+// para que req.ip reflita o IP real do cliente via X-Forwarded-For
+app.set('trust proxy', 1);
+
+// Cabeçalhos de segurança HTTP (X-Content-Type-Options, X-Frame-Options, HSTS, etc.)
+app.use(helmet());
+
+// CORS restrito à origem configurada
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true,
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Limita payloads a 1 MB — suficiente para prompts e código-fonte em texto
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
+
+// Rate limit geral: 100 requisições / 15 min por IP
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+});
+
+// Rate limit estrito para geração (operação custosa de IA): 10 requisições / 15 min
+const generateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many generation requests. Please try again later.' },
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/generate', generateLimiter);
 
 // Initialize database
 initializeDatabase();
