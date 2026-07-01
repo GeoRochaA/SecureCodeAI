@@ -33,6 +33,8 @@ npm run dev
 
 Abra `http://localhost:5173`
 
+> O backend escuta em `http://localhost:3001` por padrão.
+
 ## Build para produção
 
 Backend:

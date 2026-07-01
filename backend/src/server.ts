@@ -38,9 +38,18 @@ app.use((_req: Request, res: Response) => {
 const startServer = async () => {
   await initializeDatabase();
 
-  const port = 3000;
-  app.listen(port, () => {
+  const port = Number(process.env.PORT || '3001');
+  const server = app.listen(port, () => {
     console.log(`\n✅ SecureCode Scanner: http://localhost:${port}\n`);
+  });
+
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Porta ${port} já está em uso. Pare o outro processo ou use PORT=xxxx.`);
+    } else {
+      console.error('Erro ao iniciar o servidor:', error);
+    }
+    process.exit(1);
   });
 };
 

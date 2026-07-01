@@ -5,11 +5,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3001:3001"
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/securecode.db
-      - CORS_ORIGIN=http://localhost:5173
+      - PORT=3001
     volumes:
       - ./backend/data:/app/data
     networks:
