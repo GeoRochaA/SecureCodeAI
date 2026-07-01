@@ -1,13 +1,4 @@
 import React, { useState } from 'react'
-import axios from 'axios'
-import CodeEditor from '../components/CodeEditor'
-
-interface SecurityAnalysis {
-  promptRiskLevel: string
-  isInjectionDetected: boolean
-  injectionType?: string
-  injectionDetails: string[]
-}
 
 interface CodeVulnerability {
   type: string
@@ -21,36 +12,28 @@ interface CodeVulnerability {
   fixedSnippet?: string
 }
 
-interface CodeAnalysis {
-  isVulnerable: boolean
-  vulnerabilities: CodeVulnerability[]
-  riskScore: number
-}
-
-interface AuditResponse {
+interface CodeAnalysisResponse {
   id: string
-  prompt: string
-  code: string
   language: string
   explanation: string
-  securityAnalysis: SecurityAnalysis
-  codeAnalysis?: CodeAnalysis
-  secureCode?: string
-  createdAt: string
+  codeAnalysis: {
+    isVulnerable: boolean
+    vulnerabilities: CodeVulnerability[]
+    riskScore: number
+  }
 }
 
 const ChatPage: React.FC = () => {
-  const [codeInput, setCodeInput] = useState('// Cole o código ou múltiplos arquivos aqui para auditoria.')
-  const [analysis, setAnalysis] = useState<AuditResponse | null>(null)
+  const [codeInput, setCodeInput] = useState('// Cole código aqui para análise')
+  const [analysis, setAnalysis] = useState<CodeAnalysisResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const vulnerabilities = analysis?.codeAnalysis?.vulnerabilities || []
-  const detectedLanguage = analysis?.language || 'typescript'
 
   const executeAnalyze = async () => {
     if (!codeInput.trim()) {
-      setError('Cole código para auditar.')
+      setError('Cole código para analisar.')
       return
     }
 
@@ -59,149 +42,103 @@ const ChatPage: React.FC = () => {
     setAnalysis(null)
 
     try {
-      const res = await axios.post('/api/analyze', { code: codeInput })
-      setAnalysis(res.data)
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: codeInput })
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Erro ao analisar código')
+      }
+
+      const data = await res.json()
+      setAnalysis(data)
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Falha ao auditar código')
+      setError(err.message || 'Erro ao analisar código')
     } finally {
       setLoading(false)
     }
+  }
+
+  const getRiskBadge = (severity: string) => {
+    const colors: Record<string, string> = {
+      critical: 'bg-red-500/20 text-red-200',
+      high: 'bg-orange-500/20 text-orange-200',
+      medium: 'bg-yellow-500/20 text-yellow-200',
+      low: 'bg-green-500/20 text-green-200',
+    }
+    return colors[severity] || colors.low
   }
 
   return (
     <div className="space-y-6">
       <section className="card">
         {error && (
-          <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
+          <div className="mb-4 rounded-lg border border-red-500 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>
         )}
 
-        <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <label className="text-sm font-semibold text-slate-200">Editor de Código</label>
-          </div>
-          <CodeEditor
+        <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
+          <label htmlFor="code-input" className="text-sm font-semibold text-slate-200">Seu Código</label>
+          <textarea
+            id="code-input"
             value={codeInput}
-            onValueChange={setCodeInput}
-            language={detectedLanguage}
-            placeholder="Cole aqui o código ou um conjunto de arquivos"
+            onChange={(event) => setCodeInput(event.target.value)}
+            placeholder="Cole seu código aqui..."
+            className="w-full min-h-[320px] resize-none rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           />
-          <button onClick={executeAnalyze} className="btn-primary" disabled={loading}>
-            {loading ? 'Auditando...' : 'Iniciar auditoria'}
+          <button
+            onClick={executeAnalyze}
+            disabled={loading}
+            className="w-full px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white font-semibold transition-colors"
+          >
+            {loading ? 'Analisando...' : 'Analisar'}
           </button>
         </div>
       </section>
 
-      <section className="card space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-xl font-semibold text-cyber-blue">Auditoria</h2>
-        </div>
-
-        {!analysis && !error && (
-          <div className="rounded-2xl border border-slate-700 bg-slate-950 p-6 text-slate-400">
-            Execute uma auditoria para visualizar vulnerabilidades e correções.
+      {analysis && (
+        <section className="card space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Resultado</h3>
+            <p className="text-sm text-slate-400">{analysis.language.toUpperCase()}</p>
           </div>
-        )}
 
-        {analysis && (
-          <div className="grid gap-6">
-            <div className="rounded-2xl border border-slate-700 bg-slate-950 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold text-white">Vulnerabilidades</h3>
-                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">OWASP</span>
-              </div>
-              {vulnerabilities.length ? (
-                <div className="mt-4 space-y-4">
-                  {vulnerabilities.map((item, index) => (
-                    <div key={`${item.type}-${index}`} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-white">{translateVulnerability(item.type)}</p>
-                          <p className="text-sm text-slate-400 mt-1">{item.owaspCategory}</p>
-                        </div>
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getRiskBadge(item.severity)}`}>
-                          {translateSeverity(item.severity)}
-                        </span>
+          <p className="text-slate-300">{analysis.explanation}</p>
+
+          {vulnerabilities.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-white mb-3">Vulnerabilidades ({vulnerabilities.length})</h4>
+              <div className="space-y-3">
+                {vulnerabilities.map((vuln, idx) => (
+                  <div key={idx} className="border border-slate-700 rounded-lg p-3 bg-slate-900">
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <div>
+                        <p className="font-semibold text-white">{vuln.type}</p>
+                        <p className="text-xs text-slate-400">{vuln.owaspCategory}</p>
                       </div>
-                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                        <SnippetBlock title="Vulnerável" tone="danger" code={getVulnerableSnippet(item)} />
-                        <SnippetBlock title="Corrigido" tone="safe" code={getFixedSnippet(item)} />
-                      </div>
+                      <span className={`text-xs font-semibold px-2 py-1 rounded ${getRiskBadge(vuln.severity)}`}>
+                        {vuln.severity.toUpperCase()}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-slate-400">Nenhum finding detectado.</p>
-              )}
+                    <p className="text-sm text-slate-300 mb-2">{vuln.description}</p>
+                    {vuln.recommendation && <p className="text-xs text-green-400">✓ {vuln.recommendation}</p>}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+
+          {!analysis.codeAnalysis.isVulnerable && (
+            <div className="border border-green-500/30 bg-green-500/10 rounded-lg p-3 text-green-200 text-sm">
+              ✓ Nenhuma vulnerabilidade detectada
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
-}
-
-interface SnippetBlockProps {
-  title: string
-  tone: 'danger' | 'safe'
-  code: string
-}
-
-const SnippetBlock: React.FC<SnippetBlockProps> = ({ title, tone, code }) => {
-  const color = tone === 'danger' ? 'text-red-300 border-red-500/20 bg-red-500/5' : 'text-emerald-300 border-emerald-500/20 bg-emerald-500/5'
-  const dot = tone === 'danger' ? 'bg-red-400' : 'bg-emerald-400'
-
-  return (
-    <div className={`rounded-xl border p-4 ${color}`}>
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
-        {title}
-      </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-200">
-        <code>{code}</code>
-      </pre>
-    </div>
-  )
-}
-
-const translateVulnerability = (type: string) => {
-  const labels: Record<string, string> = {
-    'SQL Injection': 'Injeção SQL',
-    'Reflected XSS': 'XSS Refletido',
-    'Unsafe Code Execution': 'Execução Insegura de Código',
-    'Hardcoded Credential': 'Credencial Hardcoded',
-    'Unsafe JWT Secret': 'JWT Inseguro',
-    'Missing CSRF Protection': 'Falta de Proteção CSRF',
-    'Missing Authorization': 'Falta de Autorização',
-    'Unsafe File Upload': 'Upload Inseguro de Arquivos',
-    'Sensitive Data Exposure': 'Exposição de Dados Sensíveis',
-    'Weak Password Hashing': 'Hash de Senha Fraco',
-    'Missing Input Validation': 'Falta de Validação de Entrada',
-  }
-  return labels[type] || type
-}
-
-const translateSeverity = (severity: string) => {
-  const labels: Record<string, string> = {
-    low: 'BAIXO',
-    medium: 'MÉDIO',
-    high: 'ALTO',
-    critical: 'CRÍTICO',
-  }
-  return labels[severity.toLowerCase()] || severity.toUpperCase()
-}
-
-const getVulnerableSnippet = (item: CodeVulnerability) =>
-  item.vulnerableSnippet || item.description || 'Trecho vulnerável detectado.'
-
-const getFixedSnippet = (item: CodeVulnerability) =>
-  item.fixedSnippet || item.recommendation || 'Aplicar mitigação recomendada.'
-
-const getRiskBadge = (level: string | number) => {
-  const normalized = String(level).toLowerCase()
-  if (normalized.includes('crit') || normalized === 'critical' || Number(level) > 75) return 'badge-critical'
-  if (normalized.includes('alto') || normalized.includes('high') || Number(level) > 50) return 'badge-high'
-  if (normalized.includes('medio') || normalized.includes('medium') || Number(level) > 25) return 'badge-medium'
-  return 'badge-low'
 }
 
 export default ChatPage

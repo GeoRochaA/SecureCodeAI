@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { run, query } from '../database/init.js';
 
 export interface SecurityAnalysis {
@@ -336,7 +336,7 @@ export const analyzePromptSecurity = async (
     ? prompt.slice(0, MAX_STORED_PROMPT) + '…[truncated]'
     : prompt;
 
-  const promptId = uuidv4();
+  const promptId = randomUUID();
   await run(
     `INSERT INTO prompts (id, user_input, risk_level, is_injection_detected, injection_type)
      VALUES (?, ?, ?, ?, ?)`,
@@ -439,7 +439,7 @@ export const logSecurityEvent = async (
   details?: unknown,
   ipAddress?: string
 ): Promise<void> => {
-  const id = uuidv4();
+  const id = randomUUID();
   await run(
     `INSERT INTO security_logs (id, event_type, severity, message, ip_address, details)
      VALUES (?, ?, ?, ?, ?, ?)`,

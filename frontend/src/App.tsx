@@ -1,30 +1,13 @@
-import { useState } from 'react'
-import AuditPage from './pages/ChatPage'
-import LogsPage from './pages/LogsPage'
+import ChatPage from './pages/ChatPage'
 import Header from './components/Header'
 import './App.css'
 
-type Page = 'scanner' | 'logs'
-
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('scanner')
-
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'scanner':
-        return <AuditPage />
-      case 'logs':
-        return <LogsPage />
-      default:
-        return <AuditPage />
-    }
-  }
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <Header onNavigate={setCurrentPage} currentPage={currentPage} />
+      <Header />
       <main className="container mx-auto py-6 px-4">
-        {renderPage()}
+        <ChatPage />
       </main>
     </div>
   )
